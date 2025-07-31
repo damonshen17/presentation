@@ -1,0 +1,307 @@
+<!doctype html>
+<html>
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+
+  <title>The Power of color-mix()</title>
+
+  <link rel="stylesheet" href="node_modules/reveal.js/dist/reveal.css">
+  <link rel="stylesheet" href="node_modules/reveal.js/dist/theme/black.css">
+
+  <!-- Theme used for syntax highlighting of code -->
+  <link rel="stylesheet" href="node_modules/reveal.js/plugin/highlight/monokai.css">
+
+  <!-- Custom styles -->
+  <link rel="stylesheet" href="custom.css">
+</head>
+
+<body>
+  <div class="reveal">
+    <div class="slides">
+      <!-- Title Slide -->
+      <section>
+        <h1>The Power of color-mix()</h1>
+        <p>Modern CSS Color Manipulation</p>
+      </section>
+
+      <!-- Slide 1a: Traditional Way - Red Button Only -->
+      <section data-auto-animate>
+        <h2>The "Traditional" Way</h2>
+        <p>Let's start with one button and see how the code grows...</p>
+        <div class="layout-box">
+          <pre class="fragment" data-fragment-index="1" data-id="code-animation">
+            <code class="css" data-trim data-line-numbers="1-6|7-10">
+              /* Red Button */
+              .btn-red {
+                background-color: #e53e3e;
+                color: white;
+                border: 2px solid #ff6b6b;
+              }
+              .btn-red:hover {
+                background-color: #c53030;
+                border-color: #ff4444;
+              }
+            </code>
+          </pre>
+          <div class="button-column">
+            <div class="r-stack">
+              <button class="btn red fragment" data-fragment-index="0">Button</button>
+              <button class="btn red hover fragment" data-fragment-index="2">Button</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Slide 1b: Traditional Way - All Buttons -->
+      <section data-auto-animate>
+        <h2>The "Traditional" Way</h2>
+        <div class="fragment" data-fragment-index="4">
+          <div class="button-group traditional-border">
+            <span class="color-indicator color-red"></span>
+            <span class="color-indicator color-red-hover"></span>
+            <span class="color-indicator" style="background-color: white; border-color: #e53e3e;"></span>
+          </div>
+          <div class="button-group traditional-border">
+            <span class="color-indicator color-blue"></span>
+            <span class="color-indicator color-blue-hover"></span>
+            <span class="color-indicator" style="background-color: white; border-color: #3182ce;"></span>
+          </div>
+          <div class="button-group traditional-border">
+            <span class="color-indicator color-green"></span>
+            <span class="color-indicator color-green-hover"></span>
+            <span class="color-indicator" style="background-color: white; border-color: #38a169;"></span>
+          </div>
+        </div>
+        <p>But what about more colors? Now we have to manage 6 different values.</p>
+        <div class="layout-box">
+          <pre data-id="code-animation">
+            <code class="css" data-trim data-line-numbers="|13-21|24-32">
+              /* Red Button */
+              .btn-red {
+                background-color: #e53e3e;
+                color: white;
+                border: 2px solid #ff6b6b;
+              }
+              .btn-red:hover {
+                background-color: #c53030;
+                border-color: #ff4444;
+              }
+
+              /* Blue Button */
+              .btn-blue {
+                background-color: #3182ce;
+                color: white;
+                border: 2px solid #6bb6ff;
+              }
+              .btn-blue:hover {
+                background-color: #2b6cb0;
+                border-color: #4499ee;
+              }
+
+              /* Green Button */
+              .btn-green {
+                background-color: #38a169;
+                color: white;
+                border: 2px solid #6bffa1;
+              }
+              .btn-green:hover {
+                background-color: #2f855a;
+                border-color: #44ee88;
+              }
+            </code>
+          </pre>
+          <div class="button-column">
+            <button class="btn red">Button</button>
+            <button class="btn blue fragment" data-fragment-index="1">Button</button>
+            <button class="btn green fragment" data-fragment-index="2">Button</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Slide 2a: CSS Filters - Red Button Only -->
+      <section data-auto-animate>
+        <h2>A "Smarter" Way: CSS Filters</h2>
+        <p>We can refactor to a generic <code>.btn</code> class with a hover <code>filter</code>...</p>
+        <div class="layout-box">
+          <pre class="fragment" data-fragment-index="1" data-id="filter-code-animation">
+            <code class="css" data-trim data-line-numbers="1-8|9-11">
+              .btn {
+                color: white;
+                transition: filter 0.2s;
+              }
+              .btn-red {
+                background-color: #e53e3e;
+                border: 2px solid #ff6b6b;
+              }
+              .btn:hover {
+                filter: brightness(85%);
+              }
+            </code>
+          </pre>
+          <div class="button-column">
+            <div class="r-stack">
+              <button class="btn red filter fragment" data-fragment-index="0">Button</button>
+              <button class="btn red filter hover fragment" data-fragment-index="2">Button</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Slide 2b: CSS Filters - All Buttons -->
+      <section data-auto-animate>
+        <h2>A "Smarter" Way: CSS Filters</h2>
+        <div class="fragment" data-fragment-index="2">
+          <div class="button-group filter-border">
+            <span class="color-indicator color-red"></span>
+            <span style="background-color: #e53e3e; filter: brightness(85%);" class="color-indicator"></span>
+          </div>
+          <div class="button-group filter-border">
+            <span class="color-indicator color-blue"></span>
+            <span style="background-color: #3182ce; filter: brightness(85%);" class="color-indicator"></span>
+          </div>
+          <div class="button-group filter-border">
+            <span class="color-indicator color-green"></span>
+            <span style="background-color: #38a169; filter: brightness(85%);" class="color-indicator"></span>
+          </div>
+        </div>
+        <p>This is better! Now we only need to define the base color for each button.</p>
+        <div class="layout-box">
+          <pre data-id="filter-code-animation">
+            <code class="css" data-trim data-line-numbers="12-15|16-19">
+              .btn {
+                color: white;
+                transition: filter 0.2s;
+              }
+              .btn-red {
+                background-color: #e53e3e;
+                border: 2px solid #ff6b6b;
+              }
+              .btn:hover {
+                filter: brightness(85%);
+              }
+              .btn-blue {
+                background-color: #3182ce;
+                border: 2px solid #6bb6ff;
+              }
+              .btn-green {
+                background-color: #38a169;
+                border: 2px solid #6bffa1;
+              }
+            </code>
+          </pre>
+          <div class="button-column">
+            <button class="btn red filter">Button</button>
+            <button class="btn blue filter fragment" data-fragment-index="1">Button</button>
+            <button class="btn green filter fragment" data-fragment-index="2">Button</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Slide 3a: color-mix() - Red Button Only -->
+      <section data-auto-animate>
+        <h2>The Modern Way: <code>color-mix()</code></h2>
+        <p>Using <code>color-mix()</code> gives us the most power and control...</p>
+        <div class="layout-box">
+          <pre class="fragment" data-fragment-index="1" data-id="colormix-code-animation">
+            <code class="css" data-trim data-line-numbers="1-6|7-9|10-12">
+              .btn {
+                background-color: var(--base-color);
+                color: white;
+                border: 2px solid color-mix(in oklch, var(--base-color), white 30%);
+                transition: background-color 0.2s;
+              }
+              .btn:hover {
+                background-color: color-mix(in oklch, var(--base-color), black 20%);
+              }
+              .btn-red {
+                --base-color: oklch(63% 0.26 29);
+              }
+            </code>
+          </pre>
+          <div class="button-column">
+            <div class="r-stack">
+              <button class="btn mix-red fragment" data-fragment-index="0">Button</button>
+              <button class="btn mix-red hover fragment" data-fragment-index="2">Button</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Slide 3b: color-mix() - All Buttons -->
+      <section data-auto-animate>
+        <h2>The Modern Way: <code>color-mix()</code></h2>
+        <div class="fragment" data-fragment-index="2">
+          <div class="button-group colormix-border">
+            <span class="color-indicator color-oklch-red"></span>
+          </div>
+          <div class="button-group colormix-border">
+            <span class="color-indicator color-oklch-blue"></span>
+          </div>
+          <div class="button-group colormix-border">
+            <span class="color-indicator color-oklch-green"></span>
+          </div>
+        </div>
+        <p>This is the ultimate solution. Just define one <code>--base-color</code> per button.</p>
+        <div class="layout-box">
+          <pre data-id="colormix-code-animation">
+            <code class="css" data-trim data-line-numbers="|13-15|16-18">
+              .btn {
+                background-color: var(--base-color);
+                color: white;
+                border: 2px solid color-mix(in oklch, var(--base-color), white 30%);
+                transition: background-color 0.2s;
+              }
+              .btn:hover {
+                background-color: color-mix(in oklch, var(--base-color), black 20%);
+              }
+              .btn-red {
+                --base-color: oklch(63% 0.26 29);
+              }
+              .btn-blue {
+                --base-color: oklch(60% 0.18 264);
+              }
+              .btn-green {
+                --base-color: oklch(65% 0.19 150);
+              }
+            </code>
+          </pre>
+          <div class="button-column">
+            <button class="btn mix-red hover">Button</button>
+            <button class="btn mix-blue fragment" data-fragment-index="1">Button</button>
+            <button class="btn mix-green fragment" data-fragment-index="2">Button</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Slide 4: Q&A -->
+      <section>
+        <h2>Q&A</h2>
+      </section>
+    </div>
+  </div>
+
+  <script src="node_modules/reveal.js/dist/reveal.js"></script>
+  <script src="node_modules/reveal.js/plugin/markdown/markdown.js"></script>
+  <script src="node_modules/reveal.js/plugin/notes/notes.js"></script>
+  <script src="node_modules/reveal.js/plugin/highlight/highlight.js"></script>
+  <script>
+    // More info about initialization & config: https://revealjs.com/initialization/
+    Reveal.initialize({
+      autoAnimate: true,
+      hash: true,
+
+      // Code highlighting options
+      highlight: {
+        highlightOnLoad: true,
+        escapeHTML: false
+      },
+
+      // Learn about plugins: https://revealjs.com/plugins/
+      plugins: [RevealMarkdown, RevealHighlight, RevealNotes]
+    });
+  </script>
+</body>
+
+</html>

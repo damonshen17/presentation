@@ -1,0 +1,116 @@
+/* Custom CSS for the presentation */
+
+.reveal .slides {
+  font-size: 0.8em; /* Adjust this value to your liking */
+}
+
+/* Layout helper */
+.layout-box {
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+}
+
+/* Color indicators */
+.color-indicator {
+  width: 20px;
+  height: 20px;
+  border-radius: 3px;
+  display: inline-block;
+  margin: 2px;
+  vertical-align: middle;
+  border: 2px solid #999;
+}
+
+/* Button group indicators with borders */
+.button-group {
+  display: inline-block;
+  margin: 0 10px;
+  border: 2px solid;
+  border-radius: 8px;
+  padding: 4px;
+}
+
+.traditional-border { border-color: #ff6b6b; }
+.filter-border { border-color: #4ecdc4; } 
+.colormix-border { border-color: #45b7d1; }
+
+.color-red { background-color: #e53e3e; }
+.color-red-hover { background-color: #c53030; }
+.color-blue { background-color: #3182ce; }
+.color-blue-hover { background-color: #2b6cb0; }
+.color-green { background-color: #38a169; }
+.color-green-hover { background-color: #2f855a; }
+
+.color-oklch-red { background-color: oklch(63% 0.26 29); }
+.color-oklch-red-hover { background-color: color-mix(in oklch, oklch(63% 0.26 29), black 20%); }
+.color-oklch-blue { background-color: oklch(60% 0.18 264); }
+.color-oklch-blue-hover { background-color: color-mix(in oklch, oklch(60% 0.18 264), black 20%); }
+.color-oklch-green { background-color: oklch(65% 0.19 150); }
+.color-oklch-green-hover { background-color: color-mix(in oklch, oklch(65% 0.19 150), black 20%); }
+
+.button-column {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Base button style */
+.btn {
+  color: white;
+  padding: 10px 20px;
+  border: 2px solid;
+  border-radius: 5px;
+  margin-bottom: 10px;
+  font-size: 1em;
+}
+
+/* Traditional Buttons */
+.btn.red {
+  background-color: #e53e3e;
+  border-color: #ff6b6b;
+}
+.btn.red.hover, .btn.red:hover {
+  background-color: #c53030;
+  border-color: #ff4444;
+}
+
+.btn.blue {
+  background-color: #3182ce;
+  border-color: #6bb6ff;
+}
+.btn.blue.hover, .btn.blue:hover {
+  background-color: #2b6cb0;
+  border-color: #4499ee;
+}
+
+.btn.green {
+  background-color: #38a169;
+  border-color: #6bffa1;
+}
+.btn.green.hover, .btn.green:hover {
+  background-color: #2f855a;
+  border-color: #44ee88;
+}
+
+/* Filter Buttons */
+.btn.filter.red {
+  border-color: #ff6b6b;
+}
+.btn.filter.blue {
+  border-color: #6bb6ff;
+}
+.btn.filter.green {
+  border-color: #6bffa1;
+}
+.btn.filter:hover, .btn.filter.hover {
+  filter: brightness(85%);
+}
+
+/* Color-mix Buttons */
+.btn.mix-red { --base-color: oklch(63% 0.26 29); background-color: var(--base-color); border-color: color-mix(in oklch, var(--base-color), white 30%); }
+.btn.mix-blue { --base-color: oklch(60% 0.18 264); background-color: var(--base-color); border-color: color-mix(in oklch, var(--base-color), white 30%); }
+.btn.mix-green { --base-color: oklch(65% 0.19 150); background-color: var(--base-color); border-color: color-mix(in oklch, var(--base-color), white 30%); }
+
+.btn.mix-red:hover, .btn.mix-red.hover { background-color: color-mix(in oklch, oklch(63% 0.26 29), black 20%); }
+.btn.mix-blue:hover, .btn.mix-blue.hover { background-color: color-mix(in oklch, oklch(60% 0.18 264), black 20%); }
+.btn.mix-green:hover, .btn.mix-green.hover { background-color: color-mix(in oklch, oklch(65% 0.19 150), black 20%); }
