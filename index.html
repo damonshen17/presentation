@@ -279,6 +279,29 @@
       <section>
         <h2>Q&A</h2>
       </section>
+
+      <!-- Slide 5: Why OKLCH over sRGB? -->
+      <section>
+        <h2>Why OKLCH over sRGB?</h2>
+        <div class="layout-box">
+          <div style="flex: 1;">
+            <h3>Red + Green Mixing</h3>
+            <pre><code class="css" data-trim>
+              /* sRGB */
+              color-mix(in srgb, red, green)
+            </code></pre>
+            <div style="height: 60px; background: color-mix(in srgb, red, green); border-radius: 8px; margin: 20px 0;"></div>
+          </div>
+          <div style="flex: 1;">
+            <h3>&nbsp;</h3>
+            <pre><code class="css" data-trim>
+              /* OKLCH */
+              color-mix(in oklch, red, green)
+            </code></pre>
+            <div style="height: 60px; background: color-mix(in oklch, red, green); border-radius: 8px; margin: 20px 0;"></div>
+          </div>
+        </div>
+      </section>
     </div>
   </div>
 
