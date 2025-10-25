@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LEARNEXT Cache Mechanism</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/5.1.0/reveal.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/5.1.0/theme/white.min.css">
+    <style>
+        .reveal {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+        }
+        
+        .reveal h1, .reveal h2, .reveal h3 {
+            text-transform: none;
+            color: #333;
+        }
+        
+        .reveal h1 {
+            font-size: 2.2em;
+            font-weight: 600;
+        }
+        
+        .reveal h2 {
+            font-size: 1.6em;
+            font-weight: 600;
+            margin-bottom: 30px;
+        }
+        
+        .reveal h3 {
+            font-size: 1.2em;
+            font-weight: 500;
+        }
+        
+        .flow-diagram {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 20px;
+            margin: 40px 0;
+        }
+        
+        .flow-item {
+            background: #f5f5f5;
+            padding: 20px 30px;
+            border-radius: 8px;
+            border: 2px solid #ddd;
+        }
+        
+        .arrow {
+            font-size: 1.5em;
+            color: #666;
+        }
+        
+        .code-box {
+            background: #f8f8f8;
+            padding: 15px;
+            margin: 15px 0;
+            border-left: 3px solid #666;
+            text-align: left;
+            font-family: 'Courier New', monospace;
+            font-size: 0.75em;
+            line-height: 1.6;
+        }
+        
+        .url-box {
+            background: #e8f4f8;
+            padding: 12px 15px;
+            margin: 10px 0 20px 0;
+            border-radius: 6px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.7em;
+            color: #0066cc;
+            word-break: break-all;
+        }
+        
+        .status-hit {
+            color: #2e7d32;
+            font-weight: bold;
+        }
+        
+        .status-miss {
+            color: #c62828;
+            font-weight: bold;
+        }
+        
+        .status-dynamic {
+            color: #f57c00;
+            font-weight: bold;
+        }
+        
+        table {
+            font-size: 0.75em;
+            border-collapse: collapse;
+            margin: 20px auto;
+        }
+        
+        table th {
+            background: #f5f5f5;
+            padding: 12px;
+            border: 1px solid #ddd;
+            font-weight: 600;
+        }
+        
+        table td {
+            padding: 10px 12px;
+            border: 1px solid #ddd;
+        }
+        
+        .info-box {
+            background: #f5f5f5;
+            padding: 15px 20px;
+            margin: 15px 0;
+            border-radius: 6px;
+            text-align: left;
+        }
+        
+        code {
+            background: #f0f0f0;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 0.9em;
+        }
+        
+        ul {
+            text-align: left;
+        }
+        
+        .section-number {
+            color: #999;
+            font-weight: normal;
+        }
+    </style>
+</head>
+<body>
+    <div class="reveal">
+        <div class="slides">
+            <!-- Title -->
+            <section>
+                <h1>LEARNEXT Cache Mechanism</h1>
+                <p style="margin-top: 40px; color: #666;">Understanding Cloudflare & Vercel Caching</p>
+                <p style="font-size: 0.7em; color: #999; margin-top: 30px;">Issue #2983</p>
+            </section>
+
+            <!-- Architecture -->
+            <section>
+                <h2>Architecture Overview</h2>
+                <div class="flow-diagram">
+                    <div class="flow-item">User</div>
+                    <div class="arrow">→</div>
+                    <div class="flow-item">Cloudflare</div>
+                    <div class="arrow">→</div>
+                    <div class="flow-item">Vercel</div>
+                    <div class="arrow">→</div>
+                    <div class="flow-item">Next.js</div>
+                </div>
+                <p style="color: #666; margin-top: 40px;">Three-layer caching system</p>
+            </section>
+
+            <!-- Cache Layers -->
+            <section>
+                <h2>Cache Layers</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Layer</th>
+                            <th>What It Caches</th>
+                            <th>Control</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><strong>Cloudflare</strong></td>
+                            <td>Static assets, HTML, APIs</td>
+                            <td>Cache-Control headers</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Vercel Edge</strong></td>
+                            <td>ISR pages, RSC, fetch results</td>
+                            <td>revalidate property</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Next.js</strong></td>
+                            <td>ISR HTML, App Router data</td>
+                            <td>revalidate, cache flags</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </section>
+
+            <!-- How to Check -->
+            <section>
+                <h2>How to Check Cache Status</h2>
+                <div class="info-box">
+                    <strong>Using cURL:</strong>
+                    <div class="code-box" style="margin-top: 10px;">
+curl -I https://learn.deeplearning.ai/
+                    </div>
+                </div>
+                <div class="info-box" style="margin-top: 30px;">
+                    <strong>Using Browser DevTools:</strong>
+                    <ul style="margin-top: 10px; font-size: 0.9em;">
+                        <li>Open DevTools (F12)</li>
+                        <li>Go to Network tab</li>
+                        <li>Select a request</li>
+                        <li>View Response Headers</li>
+                    </ul>
+                </div>
+            </section>
+
+            <!-- Key Headers -->
+            <section>
+                <h2>Key HTTP Headers</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Header</th>
+                            <th>Purpose</th>
+                            <th>Example Values</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><code>cf-cache-status</code></td>
+                            <td>Cloudflare cache result</td>
+                            <td>HIT, MISS, DYNAMIC</td>
+                        </tr>
+                        <tr>
+                            <td><code>x-vercel-cache</code></td>
+                            <td>Vercel cache result</td>
+                            <td>HIT, MISS</td>
+                        </tr>
+                        <tr>
+                            <td><code>cache-control</code></td>
+                            <td>Caching directives</td>
+                            <td>max-age=3600</td>
+                        </tr>
+                        <tr>
+                            <td><code>age</code></td>
+                            <td>Time in cache (seconds)</td>
+                            <td>199, 1255506</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </section>
+
+            <!-- Cloudflare Homepage -->
+            <section>
+                <h2>Cloudflare: Homepage</h2>
+                <div class="url-box">
+                    https://learn.deeplearning.ai/
+                </div>
+                <div class="code-box">
+cf-cache-status: <span class="status-dynamic">DYNAMIC</span>
+x-vercel-cache: <span class="status-hit">HIT</span>
+cache-control: public, max-age=0, must-revalidate
+age: 199
+server: cloudflare
+                </div>
+                <div class="info-box" style="margin-top: 30px;">
+                    <strong>Interpretation:</strong>
+                    <ul style="margin-top: 10px;">
+                        <li>Cloudflare bypasses cache (DYNAMIC)</li>
+                        <li>Vercel serves from cache</li>
+                        <li>Page was cached 199 seconds ago</li>
+                    </ul>
+                </div>
+            </section>
+
+            <!-- Cloudflare Static -->
+            <section>
+                <h2>Cloudflare: Static Asset</h2>
+                <div class="url-box">
+                    https://learn.deeplearning.ai/learnext/_next/static/chunks/e7791de1-b84b808d99d4e7c5.js
+                </div>
+                <div class="code-box">
+cf-cache-status: <span class="status-hit">HIT</span>
+x-vercel-cache: <span class="status-hit">HIT</span>
+cache-control: public, max-age=31536000, immutable
+age: 1255506
+server: cloudflare
+                </div>
+                <div class="info-box" style="margin-top: 30px;">
+                    <strong>Interpretation:</strong>
+                    <ul style="margin-top: 10px;">
+                        <li>Both layers cache the asset</li>
+                        <li>Cached for 1 year (31536000s)</li>
+                        <li>Asset is 14.5 days old in cache</li>
+                    </ul>
+                </div>
+            </section>
+
+            <!-- Vercel Homepage -->
+            <section>
+                <h2>Vercel: Homepage</h2>
+                <div class="url-box">
+                    https://learnext-git-hotfix-revert-checkout-success-events-dlai-eng.vercel.app/
+                </div>
+                <div class="code-box">
+x-vercel-cache: <span class="status-hit">HIT</span>
+cache-control: public, max-age=0, must-revalidate
+x-nextjs-prerender: 1
+age: 76
+server: Vercel
+                </div>
+                <div class="info-box" style="margin-top: 30px;">
+                    <strong>Interpretation:</strong>
+                    <ul style="margin-top: 10px;">
+                        <li>Prerendered with ISR</li>
+                        <li>Must revalidate on each request</li>
+                        <li>Cached 76 seconds ago</li>
+                    </ul>
+                </div>
+            </section>
+
+            <!-- Vercel Static -->
+            <section>
+                <h2>Vercel: Static Asset</h2>
+                <div class="url-box">
+                    https://learnext-git-hotfix-revert-checkout-success-events-dlai-eng.vercel.app/learnext/_next/static/chunks/e7791de1-b84b808d99d4e7c5.js
+                </div>
+                <div class="code-box">
+x-vercel-cache: <span class="status-hit">HIT</span>
+cache-control: public, max-age=31536000, immutable
+age: 0
+server: Vercel
+                </div>
+                <div class="info-box" style="margin-top: 30px;">
+                    <strong>Interpretation:</strong>
+                    <ul style="margin-top: 10px;">
+                        <li>Immutable static asset</li>
+                        <li>Cached for 1 year</li>
+                        <li>Fresh fetch (age=0)</li>
+                    </ul>
+                </div>
+            </section>
+
+            <!-- Cache Status Values -->
+            <section>
+                <h2>Cache Status Values</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Status</th>
+                            <th>Meaning</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><span class="status-hit">HIT</span></td>
+                            <td>Served from cache (fast)</td>
+                        </tr>
+                        <tr>
+                            <td><span class="status-miss">MISS</span></td>
+                            <td>Not in cache, fetched from origin</td>
+                        </tr>
+                        <tr>
+                            <td><span class="status-dynamic">DYNAMIC</span></td>
+                            <td>Cloudflare bypasses cache</td>
+                        </tr>
+                        <tr>
+                            <td>EXPIRED</td>
+                            <td>Cache expired, needs revalidation</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </section>
+
+            <!-- Flow: HIT -->
+            <section>
+                <h2>Cache Flow: HIT</h2>
+                <div style="text-align: left; margin: 30px 50px;">
+                    <div class="info-box">1. User requests static asset</div>
+                    <div style="text-align: center; margin: 10px 0;">↓</div>
+                    <div class="info-box">2. Cloudflare cache: <span class="status-hit">HIT</span></div>
+                    <div style="text-align: center; margin: 10px 0;">↓</div>
+                    <div class="info-box">3. Response served instantly</div>
+                </div>
+                <p style="color: #666; margin-top: 30px;">Fastest path: Cloudflare edge</p>
+            </section>
+
+            <!-- Flow: MISS -->
+            <section>
+                <h2>Cache Flow: MISS</h2>
+                <div style="text-align: left; margin: 30px 50px;">
+                    <div class="info-box">1. User requests new page</div>
+                    <div style="text-align: center; margin: 10px 0;">↓</div>
+                    <div class="info-box">2. Cloudflare: <span class="status-miss">MISS</span></div>
+                    <div style="text-align: center; margin: 10px 0;">↓</div>
+                    <div class="info-box">3. Vercel Edge: <span class="status-miss">MISS</span></div>
+                    <div style="text-align: center; margin: 10px 0;">↓</div>
+                    <div class="info-box">4. Next.js generates page</div>
+                </div>
+                <p style="color: #666; margin-top: 30px;">Slowest path: Full generation</p>
+            </section>
+
+            <!-- Flow: DYNAMIC -->
+            <section>
+                <h2>Cache Flow: DYNAMIC</h2>
+                <div style="text-align: left; margin: 30px 50px;">
+                    <div class="info-box">1. User requests homepage</div>
+                    <div style="text-align: center; margin: 10px 0;">↓</div>
+                    <div class="info-box">2. Cloudflare: <span class="status-dynamic">DYNAMIC</span> (bypass)</div>
+                    <div style="text-align: center; margin: 10px 0;">↓</div>
+                    <div class="info-box">3. Vercel Edge: <span class="status-hit">HIT</span></div>
+                    <div style="text-align: center; margin: 10px 0;">↓</div>
+                    <div class="info-box">4. Response from Vercel cache</div>
+                </div>
+                <p style="color: #666; margin-top: 30px;">Common for ISR pages</p>
+            </section>
+
+            <!-- Best Practices -->
+            <section>
+                <h2>Best Practices</h2>
+                <div style="text-align: left; margin: 30px 50px; font-size: 0.9em;">
+                    <div class="info-box">
+                        <strong>Static Assets:</strong><br>
+                        <code>max-age=31536000, immutable</code>
+                    </div>
+                    <div class="info-box">
+                        <strong>ISR Pages:</strong><br>
+                        Set appropriate <code>revalidate</code> intervals
+                    </div>
+                    <div class="info-box">
+                        <strong>Dynamic Content:</strong><br>
+                        <code>max-age=0, must-revalidate</code>
+                    </div>
+                    <div class="info-box">
+                        <strong>Monitoring:</strong><br>
+                        Check <code>age</code> and cache status headers
+                    </div>
+                </div>
+            </section>
+
+            <!-- Summary -->
+            <section>
+                <h2>Key Takeaways</h2>
+                <div style="text-align: left; margin: 30px 50px; font-size: 0.9em;">
+                    <div class="info-box">1. Three cache layers work together</div>
+                    <div class="info-box">2. Check <code>cf-cache-status</code> and <code>x-vercel-cache</code></div>
+                    <div class="info-box">3. Static assets: long TTL + immutable</div>
+                    <div class="info-box">4. ISR pages: <code>max-age=0, must-revalidate</code></div>
+                    <div class="info-box">5. Use <code>age</code> to check cache freshness</div>
+                </div>
+            </section>
+
+            <!-- End -->
+            <section>
+                <h1>Thank You</h1>
+                <p style="color: #666; margin-top: 40px;">Questions?</p>
+            </section>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/5.1.0/reveal.min.js"></script>
+    <script>
+        Reveal.initialize({
+            hash: true,
+            transition: 'slide',
+            center: true,
+            controls: true,
+            progress: true,
+            slideNumber: true,
+            keyboard: true,
+            overview: true
+        });
+    </script>
+</body>
+</html>
