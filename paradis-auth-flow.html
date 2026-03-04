@@ -1,0 +1,989 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Paradis Authentication Architecture</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@300;400;500;600;700&display=swap');
+
+  :root {
+    --bg: #0a0a0f;
+    --surface: #12121a;
+    --surface-2: #1a1a26;
+    --surface-3: #222233;
+    --border: #2a2a3d;
+    --border-bright: #3d3d5c;
+    --text: #e8e8f0;
+    --text-dim: #8888a0;
+    --text-muted: #5c5c73;
+    --ymir: #7c3aed;
+    --ymir-soft: #7c3aed22;
+    --ymir-glow: #7c3aed44;
+    --nextjs: #06b6d4;
+    --nextjs-soft: #06b6d422;
+    --nextjs-glow: #06b6d444;
+    --shared: #f59e0b;
+    --shared-soft: #f59e0b22;
+    --external: #ef4444;
+    --external-soft: #ef444422;
+    --success: #22c55e;
+    --success-soft: #22c55e22;
+    --cookie: #ec4899;
+    --cookie-soft: #ec489922;
+    --flow-line: #4a4a6a;
+    --radius: 12px;
+    --radius-sm: 8px;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Inter', -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    min-height: 100vh;
+  }
+
+  /* ─── HEADER ─── */
+  .hero {
+    padding: 60px 40px 40px;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+  }
+  .hero::before {
+    content: '';
+    position: absolute;
+    top: -100px; left: 50%; transform: translateX(-50%);
+    width: 600px; height: 600px;
+    background: radial-gradient(circle, var(--ymir-glow) 0%, transparent 70%);
+    pointer-events: none;
+  }
+  .hero h1 {
+    font-size: 2.4rem;
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    background: linear-gradient(135deg, var(--ymir) 0%, var(--nextjs) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin-bottom: 8px;
+    position: relative;
+  }
+  .hero .subtitle {
+    color: var(--text-dim);
+    font-size: 1.05rem;
+    font-weight: 300;
+  }
+  .hero .tech-badges {
+    display: flex;
+    justify-content: center;
+    gap: 10px;
+    margin-top: 20px;
+    flex-wrap: wrap;
+  }
+  .badge {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.72rem;
+    padding: 4px 12px;
+    border-radius: 100px;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    background: var(--surface);
+  }
+  .badge.ymir { border-color: var(--ymir); color: var(--ymir); }
+  .badge.nextjs { border-color: var(--nextjs); color: var(--nextjs); }
+  .badge.shared { border-color: var(--shared); color: var(--shared); }
+
+  /* ─── LAYOUT ─── */
+  .container {
+    max-width: 1280px;
+    margin: 0 auto;
+    padding: 0 32px 80px;
+  }
+
+  /* ─── ARCHITECTURE OVERVIEW ─── */
+  .arch-section {
+    margin-bottom: 56px;
+  }
+  .section-label {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.15em;
+    color: var(--text-muted);
+    margin-bottom: 20px;
+  }
+  .arch-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 16px;
+  }
+  @media (max-width: 900px) { .arch-grid { grid-template-columns: 1fr; } }
+
+  .arch-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 24px;
+    position: relative;
+    overflow: hidden;
+  }
+  .arch-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+  }
+  .arch-card.ymir::before { background: var(--ymir); }
+  .arch-card.nextjs::before { background: var(--nextjs); }
+  .arch-card.shared::before { background: var(--shared); }
+
+  .arch-card h3 {
+    font-size: 1.05rem;
+    font-weight: 600;
+    margin-bottom: 4px;
+  }
+  .arch-card .card-path {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    margin-bottom: 12px;
+  }
+  .arch-card p {
+    font-size: 0.88rem;
+    color: var(--text-dim);
+    margin-bottom: 12px;
+  }
+  .arch-card .features {
+    list-style: none;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .arch-card .features li {
+    font-size: 0.72rem;
+    padding: 3px 10px;
+    border-radius: 100px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+  }
+
+  /* ─── FLOW DIAGRAMS ─── */
+  .flow-section {
+    margin-bottom: 56px;
+  }
+  .flow-title {
+    font-size: 1.35rem;
+    font-weight: 600;
+    margin-bottom: 6px;
+  }
+  .flow-desc {
+    color: var(--text-dim);
+    font-size: 0.9rem;
+    margin-bottom: 24px;
+  }
+
+  .flow-diagram {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 32px;
+    overflow-x: auto;
+  }
+
+  /* SVG Flow */
+  .flow-svg {
+    width: 100%;
+    min-width: 800px;
+  }
+
+  /* ─── COOKIE TABLE ─── */
+  .cookie-section {
+    margin-bottom: 56px;
+  }
+  .cookie-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+  @media (max-width: 768px) { .cookie-grid { grid-template-columns: 1fr; } }
+
+  .cookie-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+  }
+  .cookie-name {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.82rem;
+    color: var(--cookie);
+    margin-bottom: 8px;
+  }
+  .cookie-detail {
+    font-size: 0.82rem;
+    color: var(--text-dim);
+    margin-bottom: 4px;
+  }
+  .cookie-detail strong { color: var(--text); font-weight: 500; }
+
+  /* ─── FILE MAP ─── */
+  .filemap-section {
+    margin-bottom: 56px;
+  }
+  .filemap-group {
+    margin-bottom: 24px;
+  }
+  .filemap-group-title {
+    font-size: 0.95rem;
+    font-weight: 600;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .filemap-group-title .dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+  }
+  .dot.ymir { background: var(--ymir); }
+  .dot.nextjs { background: var(--nextjs); }
+  .dot.shared { background: var(--shared); }
+
+  .filemap-table {
+    width: 100%;
+    font-size: 0.82rem;
+    border-collapse: collapse;
+  }
+  .filemap-table td {
+    padding: 6px 12px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  .filemap-table td:first-child {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    white-space: nowrap;
+    width: 45%;
+  }
+  .filemap-table td:last-child {
+    color: var(--text-dim);
+  }
+
+  /* ─── SEQUENCE STEPS ─── */
+  .steps {
+    position: relative;
+    padding-left: 28px;
+  }
+  .steps::before {
+    content: '';
+    position: absolute;
+    left: 7px; top: 8px; bottom: 8px;
+    width: 2px;
+    background: var(--border);
+  }
+  .step {
+    position: relative;
+    margin-bottom: 16px;
+    padding: 14px 18px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+  }
+  .step::before {
+    content: '';
+    position: absolute;
+    left: -25px; top: 18px;
+    width: 12px; height: 12px;
+    border-radius: 50%;
+    border: 2px solid var(--border-bright);
+    background: var(--surface);
+  }
+  .step.ymir::before { border-color: var(--ymir); background: var(--ymir-soft); }
+  .step.nextjs::before { border-color: var(--nextjs); background: var(--nextjs-soft); }
+  .step.external::before { border-color: var(--external); background: var(--external-soft); }
+  .step.shared::before { border-color: var(--shared); background: var(--shared-soft); }
+  .step.browser::before { border-color: var(--success); background: var(--success-soft); }
+
+  .step-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 6px;
+  }
+  .step-num {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.68rem;
+    color: var(--text-muted);
+    min-width: 18px;
+  }
+  .step-actor {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.72rem;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-weight: 500;
+  }
+  .step-actor.ymir { background: var(--ymir-soft); color: var(--ymir); border: 1px solid var(--ymir); }
+  .step-actor.nextjs { background: var(--nextjs-soft); color: var(--nextjs); border: 1px solid var(--nextjs); }
+  .step-actor.browser { background: var(--success-soft); color: var(--success); border: 1px solid var(--success); }
+  .step-actor.external { background: var(--external-soft); color: var(--external); border: 1px solid var(--external); }
+  .step-actor.shared { background: var(--shared-soft); color: var(--shared); border: 1px solid var(--shared); }
+
+  .step-action {
+    font-size: 0.88rem;
+    font-weight: 500;
+  }
+  .step-detail {
+    font-size: 0.82rem;
+    color: var(--text-dim);
+    margin-left: 28px;
+  }
+  .step-code {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.75rem;
+    background: var(--bg);
+    padding: 8px 12px;
+    border-radius: 6px;
+    margin-top: 8px;
+    margin-left: 28px;
+    color: var(--text-dim);
+    overflow-x: auto;
+  }
+
+  /* ─── LEGEND ─── */
+  .legend {
+    display: flex;
+    gap: 20px;
+    flex-wrap: wrap;
+    margin-bottom: 32px;
+    padding: 16px 20px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.78rem;
+    color: var(--text-dim);
+  }
+  .legend-dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+  }
+  .legend-dot.ymir { background: var(--ymir); }
+  .legend-dot.nextjs { background: var(--nextjs); }
+  .legend-dot.browser { background: var(--success); }
+  .legend-dot.external { background: var(--external); }
+  .legend-dot.shared { background: var(--shared); }
+  .legend-dot.cookie { background: var(--cookie); }
+
+  /* ─── SECURITY NOTES ─── */
+  .security-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 12px;
+  }
+  .security-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 16px;
+  }
+  .security-card h4 {
+    font-size: 0.88rem;
+    font-weight: 600;
+    margin-bottom: 6px;
+  }
+  .security-card p {
+    font-size: 0.8rem;
+    color: var(--text-dim);
+  }
+
+  /* ─── FLOW TABS ─── */
+  .flow-tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 20px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 4px;
+    width: fit-content;
+  }
+  .flow-tab {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.78rem;
+    padding: 8px 16px;
+    border-radius: 6px;
+    border: none;
+    background: transparent;
+    color: var(--text-dim);
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .flow-tab:hover { color: var(--text); background: var(--surface-2); }
+  .flow-tab.active {
+    background: var(--surface-3);
+    color: var(--text);
+    border: 1px solid var(--border-bright);
+  }
+  .flow-panel { display: none; }
+  .flow-panel.active { display: block; }
+
+  /* ─── THREE TOKEN STORES ─── */
+  .token-stores {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 40px;
+  }
+  @media (max-width: 900px) { .token-stores { grid-template-columns: 1fr; } }
+
+  .token-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    text-align: center;
+  }
+  .token-card .token-icon {
+    font-size: 1.8rem;
+    margin-bottom: 8px;
+  }
+  .token-card h4 {
+    font-size: 0.9rem;
+    font-weight: 600;
+    margin-bottom: 4px;
+  }
+  .token-card .token-name {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.7rem;
+    color: var(--cookie);
+    margin-bottom: 8px;
+  }
+  .token-card p {
+    font-size: 0.78rem;
+    color: var(--text-dim);
+  }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <h1>Paradis Authentication Architecture</h1>
+  <p class="subtitle">OAuth 2.1 + OIDC two-tier auth system &mdash; ymir (server) &harr; nextjs (client)</p>
+  <div class="tech-badges">
+    <span class="badge ymir">Better Auth</span>
+    <span class="badge ymir">OAuth 2.1 Server</span>
+    <span class="badge nextjs">Next.js 16</span>
+    <span class="badge nextjs">Stateless JWE</span>
+    <span class="badge shared">PKCE</span>
+    <span class="badge shared">Drizzle ORM</span>
+    <span class="badge">PostgreSQL</span>
+  </div>
+</div>
+
+<div class="container">
+
+  <!-- LEGEND -->
+  <div class="legend">
+    <div class="legend-item"><div class="legend-dot ymir"></div> Ymir (Auth Server)</div>
+    <div class="legend-item"><div class="legend-dot nextjs"></div> Next.js (Client)</div>
+    <div class="legend-item"><div class="legend-dot browser"></div> Browser</div>
+    <div class="legend-item"><div class="legend-dot external"></div> External (DLAI API / Providers)</div>
+    <div class="legend-item"><div class="legend-dot shared"></div> Shared (@dlai/auth)</div>
+    <div class="legend-item"><div class="legend-dot cookie"></div> Cookie</div>
+  </div>
+
+  <!-- ARCHITECTURE OVERVIEW -->
+  <div class="arch-section">
+    <div class="section-label">System Architecture</div>
+    <div class="arch-grid">
+      <div class="arch-card ymir">
+        <h3>Ymir &mdash; Auth Server</h3>
+        <div class="card-path">apps/ymir/ &bull; :3001</div>
+        <p>OAuth 2.1 Authorization Server with Better Auth. Handles all identity operations, social login, and token management.</p>
+        <ul class="features">
+          <li>OAuth 2.1 + OIDC</li>
+          <li>Google / Apple / LinkedIn</li>
+          <li>Credentials login</li>
+          <li>Signup + Email verify</li>
+          <li>Forgot password</li>
+          <li>Token SSO</li>
+          <li>Encrypted JWT storage</li>
+        </ul>
+      </div>
+      <div class="arch-card nextjs">
+        <h3>Next.js &mdash; Client App</h3>
+        <div class="card-path">apps/nextjs/ &bull; :3000</div>
+        <p>Stateless client using JWE-encrypted session cookies. Talks to ymir via OAuth 2.1 and OIDC discovery.</p>
+        <ul class="features">
+          <li>Stateless JWE sessions</li>
+          <li>proxy.ts route guard</li>
+          <li>OAuth Proxy (Vercel)</li>
+          <li>SSO entry point</li>
+          <li>Token refresh link</li>
+          <li>AsyncLocalStorage</li>
+        </ul>
+      </div>
+      <div class="arch-card shared">
+        <h3>Shared Packages</h3>
+        <div class="card-path">@dlai/auth &bull; @dlai/db</div>
+        <p>Shared types, cookie utilities, token refresh logic, OIDC discovery, and Drizzle auth schema.</p>
+        <ul class="features">
+          <li>DlaiClaims types</li>
+          <li>Cookie helpers</li>
+          <li>Token refresh</li>
+          <li>OIDC discovery</li>
+          <li>Auth schema (Drizzle)</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- THREE TOKEN STORES -->
+  <div class="arch-section">
+    <div class="section-label">Three Independent Token Stores</div>
+    <div class="token-stores">
+      <div class="token-card">
+        <div class="token-icon">&#x1f512;</div>
+        <h4>Better Auth Session</h4>
+        <div class="token-name">__Secure-better-auth.session_token</div>
+        <p>JWE-encrypted cookie containing user identity and session metadata. Managed by Better Auth framework.</p>
+      </div>
+      <div class="token-card">
+        <div class="token-icon">&#x1f511;</div>
+        <h4>DLAI Auth Cookie</h4>
+        <div class="token-name">__Secure-dlai_auth</div>
+        <p>JSON cookie with DLAI JWT token, OAuth access/refresh tokens, user ID and hash. Used for API calls.</p>
+      </div>
+      <div class="token-card">
+        <div class="token-icon">&#x1f5c4;</div>
+        <h4>Database Record</h4>
+        <div class="token-name">user.dlaiJwtToken (encrypted)</div>
+        <p>JWE-encrypted DLAI JWT stored on user record. Single source of truth. Decrypted by customSession plugin.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- FLOW DIAGRAMS -->
+  <div class="flow-section">
+    <div class="section-label">Authentication Flows</div>
+    <div class="flow-tabs">
+      <button class="flow-tab active" onclick="showFlow('oauth')">OAuth Social Login</button>
+      <button class="flow-tab" onclick="showFlow('credentials')">Email / Password</button>
+      <button class="flow-tab" onclick="showFlow('sso')">SSO (External)</button>
+      <button class="flow-tab" onclick="showFlow('refresh')">Token Refresh</button>
+    </div>
+
+    <!-- OAUTH FLOW -->
+    <div id="flow-oauth" class="flow-panel active">
+      <div class="flow-title">OAuth 2.1 Social Login (PKCE)</div>
+      <div class="flow-desc">User clicks "Sign in with Google/Apple/LinkedIn" &mdash; full PKCE-protected flow through ymir back to Next.js.</div>
+      <div class="steps">
+        <div class="step browser">
+          <div class="step-header">
+            <span class="step-num">1</span>
+            <span class="step-actor browser">Browser</span>
+            <span class="step-action">Navigate to protected route</span>
+          </div>
+          <div class="step-detail">User visits <code>/my/*</code> (any protected path)</div>
+        </div>
+        <div class="step nextjs">
+          <div class="step-header">
+            <span class="step-num">2</span>
+            <span class="step-actor nextjs">Next.js</span>
+            <span class="step-action">proxy.ts intercepts &mdash; no session found</span>
+          </div>
+          <div class="step-detail">Calls <code>auth.api.signInWithOAuth2()</code>, generates PKCE code_verifier + state cookie</div>
+          <div class="step-code">proxy.ts &rarr; redirect to ymir /api/auth/oauth2/authorize?response_type=code&code_challenge=...</div>
+        </div>
+        <div class="step ymir">
+          <div class="step-header">
+            <span class="step-num">3</span>
+            <span class="step-actor ymir">Ymir</span>
+            <span class="step-action">OAuth authorize endpoint</span>
+          </div>
+          <div class="step-detail">Validates client_id, redirect_uri, PKCE params. Redirects to social provider.</div>
+        </div>
+        <div class="step external">
+          <div class="step-header">
+            <span class="step-num">4</span>
+            <span class="step-actor external">Google / Apple / LinkedIn</span>
+            <span class="step-action">User authenticates with provider</span>
+          </div>
+          <div class="step-detail">User enters credentials at provider. Provider redirects back to ymir callback.</div>
+        </div>
+        <div class="step ymir">
+          <div class="step-header">
+            <span class="step-num">5</span>
+            <span class="step-actor ymir">Ymir</span>
+            <span class="step-action">handleOAuthAccount() hook fires</span>
+          </div>
+          <div class="step-detail">Exchanges provider token with <strong>DLAI upstream API</strong> (<code>/user/login-by-google</code>, etc.) to get DLAI JWT. Encrypts JWT with JWE using AUTH_SECRET. Stores on user record.</div>
+          <div class="step-code">OAuth token &rarr; DLAI API &rarr; dlaiJwtToken &rarr; JWE encrypt &rarr; user.dlaiJwtToken</div>
+        </div>
+        <div class="step ymir">
+          <div class="step-header">
+            <span class="step-num">6</span>
+            <span class="step-actor ymir">Ymir</span>
+            <span class="step-action">Issues authorization code</span>
+          </div>
+          <div class="step-detail">Creates Better Auth session in DB. Redirects to Next.js callback with auth code.</div>
+        </div>
+        <div class="step nextjs">
+          <div class="step-header">
+            <span class="step-num">7</span>
+            <span class="step-actor nextjs">Next.js</span>
+            <span class="step-action">Callback: exchange code for tokens</span>
+          </div>
+          <div class="step-detail">Exchanges auth code at ymir <code>/oauth2/token</code> (with PKCE code_verifier). Gets access_token, refresh_token, id_token.</div>
+        </div>
+        <div class="step nextjs">
+          <div class="step-header">
+            <span class="step-num">8</span>
+            <span class="step-actor nextjs">Next.js</span>
+            <span class="step-action">Fetch user info + write cookies</span>
+          </div>
+          <div class="step-detail"><code>getUserInfo()</code> calls ymir <code>/oauth2/userinfo</code>, stages DLAI claims via <strong>AsyncLocalStorage</strong>. After hook writes <code>__Secure-dlai_auth</code> cookie with tokens.</div>
+          <div class="step-code">userinfo &rarr; AsyncLocalStorage.run() &rarr; after hook &rarr; Set-Cookie: __Secure-dlai_auth={dlaiJwtToken, accessToken, refreshToken, ...}</div>
+        </div>
+        <div class="step browser">
+          <div class="step-header">
+            <span class="step-num">9</span>
+            <span class="step-actor browser">Browser</span>
+            <span class="step-action">Authenticated! Two cookies set</span>
+          </div>
+          <div class="step-detail">Browser now has <code>__Secure-better-auth.session_token</code> (JWE) + <code>__Secure-dlai_auth</code> (JSON). Redirected to original protected page.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- CREDENTIALS FLOW -->
+    <div id="flow-credentials" class="flow-panel">
+      <div class="flow-title">Email / Password (Credentials)</div>
+      <div class="flow-desc">Direct credential login via ymir's custom credentialsPlugin. Bypasses OAuth flow.</div>
+      <div class="steps">
+        <div class="step browser">
+          <div class="step-header">
+            <span class="step-num">1</span>
+            <span class="step-actor browser">Browser</span>
+            <span class="step-action">User submits email + password</span>
+          </div>
+          <div class="step-detail">Login form on Next.js sends to ymir</div>
+        </div>
+        <div class="step ymir">
+          <div class="step-header">
+            <span class="step-num">2</span>
+            <span class="step-actor ymir">Ymir</span>
+            <span class="step-action">POST /api/auth/sign-in/credentials</span>
+          </div>
+          <div class="step-detail">credentialsPlugin() calls DLAI API <code>/user/login-by-password</code> with email/password.</div>
+        </div>
+        <div class="step external">
+          <div class="step-header">
+            <span class="step-num">3</span>
+            <span class="step-actor external">DLAI API</span>
+            <span class="step-action">Validates credentials, returns JWT</span>
+          </div>
+          <div class="step-detail">Returns <code>dlaiJwtToken</code> + user profile data if credentials valid.</div>
+        </div>
+        <div class="step ymir">
+          <div class="step-header">
+            <span class="step-num">4</span>
+            <span class="step-actor ymir">Ymir</span>
+            <span class="step-action">Token staging pattern</span>
+          </div>
+          <div class="step-detail">Encrypts DLAI JWT &rarr; stores on user record <strong>before</strong> creating session. Clears sessionData cache (maxAge: 0) to prevent stale reads.</div>
+          <div class="step-code">encrypt(dlaiJwt) &rarr; user.dlaiJwtToken &rarr; clear sessionData cookie &rarr; create session</div>
+        </div>
+        <div class="step browser">
+          <div class="step-header">
+            <span class="step-num">5</span>
+            <span class="step-actor browser">Browser</span>
+            <span class="step-action">Receives session + token, redirects</span>
+          </div>
+          <div class="step-detail">Client receives token + callbackURL, initiates OAuth flow to establish Next.js cookies, or uses direct session.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SSO FLOW -->
+    <div id="flow-sso" class="flow-panel">
+      <div class="flow-title">SSO &mdash; External Platform Token Auth</div>
+      <div class="flow-desc">External DLAI platform passes JWT to Next.js, which validates and creates a session. No password or OAuth needed.</div>
+      <div class="steps">
+        <div class="step external">
+          <div class="step-header">
+            <span class="step-num">1</span>
+            <span class="step-actor external">External Platform</span>
+            <span class="step-action">Redirect with JWT</span>
+          </div>
+          <div class="step-detail">Navigates to <code>/auth/sso?token=JWT&callbackURL=/courses/chatgpt</code></div>
+        </div>
+        <div class="step nextjs">
+          <div class="step-header">
+            <span class="step-num">2</span>
+            <span class="step-actor nextjs">Next.js</span>
+            <span class="step-action">Validate JWT locally</span>
+          </div>
+          <div class="step-detail">Checks JWT expiration (5-min grace period) and audience claim (<code>aud === "WEB"</code>).</div>
+          <div class="step-code">app/auth/sso/route.ts &rarr; decode JWT &rarr; check exp + aud</div>
+        </div>
+        <div class="step ymir">
+          <div class="step-header">
+            <span class="step-num">3</span>
+            <span class="step-actor ymir">Ymir</span>
+            <span class="step-action">POST /api/auth/sign-in/token</span>
+          </div>
+          <div class="step-detail">tokenPlugin() validates JWT via DLAI API <code>/user/profile</code>. Creates/updates user in DB.</div>
+        </div>
+        <div class="step nextjs">
+          <div class="step-header">
+            <span class="step-num">4</span>
+            <span class="step-actor nextjs">Next.js</span>
+            <span class="step-action">Set session cookies</span>
+          </div>
+          <div class="step-detail">Writes JWE session cookie + dlai_auth cookie. Redirects to callbackURL.</div>
+        </div>
+        <div class="step browser">
+          <div class="step-header">
+            <span class="step-num">5</span>
+            <span class="step-actor browser">Browser</span>
+            <span class="step-action">Authenticated, lands on course page</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- REFRESH FLOW -->
+    <div id="flow-refresh" class="flow-panel">
+      <div class="flow-title">Token Refresh (Transparent)</div>
+      <div class="flow-desc">When DLAI JWT expires mid-session, the tRPC authRefreshLink intercepts the 401 and silently refreshes tokens.</div>
+      <div class="steps">
+        <div class="step browser">
+          <div class="step-header">
+            <span class="step-num">1</span>
+            <span class="step-actor browser">Browser</span>
+            <span class="step-action">tRPC call returns UNAUTHORIZED (401)</span>
+          </div>
+          <div class="step-detail">DLAI JWT has expired. tRPC <code>authRefreshLink</code> catches the error.</div>
+          <div class="step-code">trpc/auth-refresh-link.ts &rarr; onError: UNAUTHORIZED &rarr; trigger refresh</div>
+        </div>
+        <div class="step nextjs">
+          <div class="step-header">
+            <span class="step-num">2</span>
+            <span class="step-actor nextjs">Next.js</span>
+            <span class="step-action">POST /api/auth/refresh-session</span>
+          </div>
+          <div class="step-detail">Calls shared <code>refreshDlaiSession()</code> from @dlai/auth.</div>
+        </div>
+        <div class="step shared">
+          <div class="step-header">
+            <span class="step-num">3</span>
+            <span class="step-actor shared">@dlai/auth</span>
+            <span class="step-action">Exchange refresh token at ymir</span>
+          </div>
+          <div class="step-detail">Reads refresh_token from dlai_auth cookie. Exchanges at ymir <code>/oauth2/token</code>. Fetches fresh claims from <code>/oauth2/userinfo</code>.</div>
+          <div class="step-code">refreshToken &rarr; ymir /oauth2/token &rarr; new access_token &rarr; ymir /oauth2/userinfo &rarr; fresh claims</div>
+        </div>
+        <div class="step nextjs">
+          <div class="step-header">
+            <span class="step-num">4</span>
+            <span class="step-actor nextjs">Next.js</span>
+            <span class="step-action">Update dlai_auth cookie</span>
+          </div>
+          <div class="step-detail">Writes updated cookie with fresh tokens and claims. Returns 200.</div>
+        </div>
+        <div class="step browser">
+          <div class="step-header">
+            <span class="step-num">5</span>
+            <span class="step-actor browser">Browser</span>
+            <span class="step-action">Retry original tRPC call</span>
+          </div>
+          <div class="step-detail">authRefreshLink retries the failed call. If refresh failed, redirects to OAuth login.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- COOKIES -->
+  <div class="cookie-section">
+    <div class="section-label">Cookie Architecture</div>
+    <div class="cookie-grid">
+      <div class="cookie-card">
+        <div class="cookie-name">__Secure-better-auth.session_token</div>
+        <div class="cookie-detail"><strong>Format:</strong> JWE (encrypted)</div>
+        <div class="cookie-detail"><strong>Contains:</strong> user identity, session ID</div>
+        <div class="cookie-detail"><strong>Encrypted by:</strong> SESSION_SECRET (Next.js) / AUTH_SECRET (ymir)</div>
+        <div class="cookie-detail"><strong>Flags:</strong> httpOnly, Secure, SameSite=Lax</div>
+        <div class="cookie-detail"><strong>Max-Age:</strong> 30 days (sliding)</div>
+      </div>
+      <div class="cookie-card">
+        <div class="cookie-name">__Secure-dlai_auth</div>
+        <div class="cookie-detail"><strong>Format:</strong> JSON (httpOnly)</div>
+        <div class="cookie-detail"><strong>Contains:</strong> dlaiUserId, dlaiJwtToken, dlaiUserHash, accessToken, refreshToken, idToken</div>
+        <div class="cookie-detail"><strong>Written by:</strong> Next.js after hook (via AsyncLocalStorage)</div>
+        <div class="cookie-detail"><strong>Flags:</strong> httpOnly, Secure, SameSite=Lax</div>
+        <div class="cookie-detail"><strong>Max-Age:</strong> 30 days</div>
+      </div>
+      <div class="cookie-card">
+        <div class="cookie-name">PKCE State Cookie</div>
+        <div class="cookie-detail"><strong>Format:</strong> Encrypted state</div>
+        <div class="cookie-detail"><strong>Contains:</strong> code_verifier, redirect URI</div>
+        <div class="cookie-detail"><strong>Lifetime:</strong> Transient (cleared after callback)</div>
+        <div class="cookie-detail"><strong>Set by:</strong> proxy.ts during OAuth initiation</div>
+      </div>
+      <div class="cookie-card">
+        <div class="cookie-name">sessionData (Better Auth cache)</div>
+        <div class="cookie-detail"><strong>Format:</strong> Cached session data</div>
+        <div class="cookie-detail"><strong>Purpose:</strong> Reduces DB lookups (7-day cache)</div>
+        <div class="cookie-detail"><strong>Gotcha:</strong> Cleared (maxAge: 0) after credentials login to prevent stale reads</div>
+        <div class="cookie-detail"><strong>Managed by:</strong> Better Auth cookieCache plugin</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- VERCEL PREVIEW PROXY -->
+  <div class="flow-section">
+    <div class="section-label">Special: Vercel Preview OAuth Proxy</div>
+    <div class="flow-desc">Preview URLs (<code>*.vercel.app</code>) aren't registered with ymir. The oAuthProxy plugin encrypts cookies through the stable deployment.</div>
+    <div class="steps">
+      <div class="step nextjs">
+        <div class="step-header">
+          <span class="step-num">1</span>
+          <span class="step-actor nextjs">Preview</span>
+          <span class="step-action">Detect origin mismatch</span>
+        </div>
+        <div class="step-detail">oAuthProxy plugin detects preview URL doesn't match registered redirect_uri.</div>
+      </div>
+      <div class="step nextjs">
+        <div class="step-header">
+          <span class="step-num">2</span>
+          <span class="step-actor nextjs">Stable Deploy</span>
+          <span class="step-action">Override redirect_uri to stable URL</span>
+        </div>
+        <div class="step-detail">Encrypts state cookie + preview URL. Uses stable deployment's registered redirect_uri.</div>
+      </div>
+      <div class="step ymir">
+        <div class="step-header">
+          <span class="step-num">3</span>
+          <span class="step-actor ymir">Ymir</span>
+          <span class="step-action">OAuth flow as normal</span>
+        </div>
+        <div class="step-detail">Redirects back to stable deployment (registered URI).</div>
+      </div>
+      <div class="step nextjs">
+        <div class="step-header">
+          <span class="step-num">4</span>
+          <span class="step-actor nextjs">Stable Deploy</span>
+          <span class="step-action">Encrypt cookies into query param</span>
+        </div>
+        <div class="step-detail">Encrypts all Set-Cookie headers into <code>?cookies=&lt;encrypted&gt;</code>. Redirects to preview URL's <code>/api/auth/oauth-proxy-callback</code>.</div>
+      </div>
+      <div class="step nextjs">
+        <div class="step-header">
+          <span class="step-num">5</span>
+          <span class="step-actor nextjs">Preview</span>
+          <span class="step-action">Decrypt and set cookies on preview domain</span>
+        </div>
+        <div class="step-detail">Decrypts cookies using <code>SESSION_SECRET</code> (must match stable deployment). Sets them on preview domain.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SECURITY -->
+  <div class="arch-section">
+    <div class="section-label">Security Patterns</div>
+    <div class="security-grid">
+      <div class="security-card">
+        <h4>PKCE Protection</h4>
+        <p>All OAuth flows use Proof Key for Code Exchange. code_verifier stored in transient cookie, code_challenge sent to authorize endpoint.</p>
+      </div>
+      <div class="security-card">
+        <h4>JWE Token Encryption</h4>
+        <p>DLAI JWT tokens encrypted at rest on user record using AUTH_SECRET. Session cookies encrypted with SESSION_SECRET. Keys must differ.</p>
+      </div>
+      <div class="security-card">
+        <h4>Token Staging Pattern</h4>
+        <p>Encrypted token written to user record BEFORE session creation. Prevents race condition where session reads stale data from cache.</p>
+      </div>
+      <div class="security-card">
+        <h4>Cookie Security</h4>
+        <p>All auth cookies: httpOnly, Secure, SameSite=Lax, __Secure- prefix in production. 30-day sliding expiration.</p>
+      </div>
+      <div class="security-card">
+        <h4>Log Sanitization</h4>
+        <p>Pino logger with custom serializers. JWT patterns auto-detected and replaced with [REDACTED_JWT]. Sensitive fields excluded.</p>
+      </div>
+      <div class="security-card">
+        <h4>OIDC Logout</h4>
+        <p>RP-Initiated Logout with id_token_hint. Ymir revokes session on both sides. Clears all local cookies before redirect.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- FILE MAP -->
+  <div class="filemap-section">
+    <div class="section-label">Key File Reference</div>
+
+    <div class="filemap-group">
+      <div class="filemap-group-title"><span class="dot ymir"></span> Ymir (Auth Server)</div>
+      <table class="filemap-table">
+        <tr><td>src/lib/auth.ts</td><td>Main Better Auth config, OAuth hooks, session plugins, social providers</td></tr>
+        <tr><td>src/lib/plugins/server.ts</td><td>Credentials, signup, forgot-password, token plugins</td></tr>
+        <tr><td>src/lib/session-utils.ts</td><td>Token encrypt/decrypt, session cache clearing</td></tr>
+        <tr><td>src/lib/linkedin-provider.ts</td><td>Custom legacy OAuth LinkedIn provider</td></tr>
+        <tr><td>src/lib/apple-client-secret.ts</td><td>Apple Sign-In JWT client secret generation</td></tr>
+        <tr><td>src/lib/crypto.ts</td><td>JWE encryption/decryption utilities</td></tr>
+        <tr><td>src/lib/enabled-providers.ts</td><td>Runtime check for available social providers</td></tr>
+      </table>
+    </div>
+
+    <div class="filemap-group">
+      <div class="filemap-group-title"><span class="dot nextjs"></span> Next.js (Client)</div>
+      <table class="filemap-table">
+        <tr><td>src/proxy.ts</td><td>Route guard &mdash; checks session, initiates OAuth if needed</td></tr>
+        <tr><td>src/lib/auth.ts</td><td>Better Auth client config, plugins, AsyncLocalStorage bridge</td></tr>
+        <tr><td>src/lib/auth-client.ts</td><td>Better Auth SDK instance for client-side</td></tr>
+        <tr><td>src/auth/server.ts</td><td>Session getters for RSC + tRPC contexts</td></tr>
+        <tr><td>src/trpc/auth-refresh-link.ts</td><td>tRPC link for transparent token refresh on 401</td></tr>
+        <tr><td>src/app/auth/sso/route.ts</td><td>SSO entry point for external platform tokens</td></tr>
+        <tr><td>src/app/api/auth/logout/route.ts</td><td>OIDC RP-Initiated Logout handler</td></tr>
+        <tr><td>src/app/api/auth/refresh-session/route.ts</td><td>Token refresh endpoint</td></tr>
+      </table>
+    </div>
+
+    <div class="filemap-group">
+      <div class="filemap-group-title"><span class="dot shared"></span> Shared Packages</div>
+      <table class="filemap-table">
+        <tr><td>packages/auth/src/types.ts</td><td>DlaiClaims, AuthUser, AuthSession types</td></tr>
+        <tr><td>packages/auth/src/cookies.ts</td><td>Cookie names, options, DlaiAuthCookie interface</td></tr>
+        <tr><td>packages/auth/src/token-refresh.ts</td><td>Framework-agnostic refreshDlaiSession()</td></tr>
+        <tr><td>packages/auth/src/discovery.ts</td><td>OIDC discovery endpoint fetching + caching</td></tr>
+        <tr><td>packages/db/src/auth-schema.ts</td><td>Drizzle schema: user, session, account, oauth* tables</td></tr>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<script>
+function showFlow(id) {
+  document.querySelectorAll('.flow-panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.flow-tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('flow-' + id).classList.add('active');
+  event.target.classList.add('active');
+}
+</script>
+
+</body>
+</html>
