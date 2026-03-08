@@ -1,0 +1,679 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Stripe 訂閱架構檢討：為什麼我們要重構</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif; background: #fafafa; color: #1a1a1a; padding: 0; line-height: 1.8; }
+
+  .hero { background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); color: white; padding: 60px 24px 50px; text-align: center; }
+  .hero h1 { font-size: 28px; font-weight: 800; margin-bottom: 12px; letter-spacing: 1px; }
+  .hero .sub { color: #94a3b8; font-size: 14px; max-width: 600px; margin: 0 auto; }
+
+  .container { max-width: 860px; margin: 0 auto; padding: 0 24px; }
+
+  .section-num { display: inline-block; background: #635bff; color: white; width: 28px; height: 28px; border-radius: 50%; text-align: center; line-height: 28px; font-size: 14px; font-weight: 700; margin-right: 8px; vertical-align: middle; }
+
+  h2 { font-size: 20px; font-weight: 700; color: #0f172a; margin: 48px 0 16px; padding-bottom: 8px; border-bottom: 2px solid #e2e8f0; }
+  h3 { font-size: 16px; font-weight: 700; color: #334155; margin: 28px 0 12px; }
+
+  p { font-size: 15px; color: #334155; margin-bottom: 16px; }
+  p .hl { background: #fef3c7; padding: 1px 4px; border-radius: 3px; font-weight: 600; }
+  p .bad { color: #dc2626; font-weight: 600; }
+  p .good { color: #16a34a; font-weight: 600; }
+  p code { background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-family: 'SF Mono', monospace; font-size: 13px; color: #7c3aed; }
+
+  .quote { background: #f0f0ff; border-left: 4px solid #635bff; padding: 16px 20px; border-radius: 0 8px 8px 0; margin: 16px 0 24px; }
+  .quote p { color: #4338ca; font-style: italic; margin-bottom: 4px; font-size: 14px; }
+  .quote .src { color: #94a3b8; font-size: 12px; font-style: normal; }
+
+  .box { border-radius: 12px; padding: 20px 24px; margin: 16px 0 24px; }
+  .box-red { background: #fef2f2; border: 1px solid #fecaca; }
+  .box-green { background: #f0fdf4; border: 1px solid #bbf7d0; }
+  .box-blue { background: #eff6ff; border: 1px solid #bfdbfe; }
+  .box-amber { background: #fffbeb; border: 1px solid #fde68a; }
+  .box h4 { font-size: 14px; font-weight: 700; margin-bottom: 8px; }
+  .box-red h4 { color: #dc2626; }
+  .box-green h4 { color: #16a34a; }
+  .box-blue h4 { color: #2563eb; }
+  .box-amber h4 { color: #d97706; }
+  .box p, .box li { font-size: 14px; }
+
+  .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 16px 0 24px; }
+  @media (max-width: 700px) { .compare { grid-template-columns: 1fr; } }
+
+  .diagram { background: #0f172a; border-radius: 12px; padding: 20px 24px; margin: 16px 0 24px; overflow-x: auto; }
+  .diagram pre { color: #94a3b8; font-family: 'SF Mono', 'Fira Code', monospace; font-size: 12px; line-height: 1.8; }
+  .diagram pre .h { color: #f1f5f9; font-weight: 700; }
+  .diagram pre .stripe { color: #a29bfe; }
+  .diagram pre .good { color: #86efac; }
+  .diagram pre .bad { color: #fca5a5; }
+  .diagram pre .warn { color: #fde68a; }
+  .diagram pre .info { color: #7dd3fc; }
+  .diagram pre .dim { color: #475569; }
+
+  ol, ul { margin: 0 0 16px 24px; }
+  li { font-size: 14px; color: #334155; margin-bottom: 8px; }
+
+  table { width: 100%; border-collapse: collapse; margin: 16px 0 24px; font-size: 13px; }
+  th { background: #f1f5f9; color: #334155; padding: 10px 12px; text-align: left; font-weight: 700; border-bottom: 2px solid #e2e8f0; }
+  td { padding: 10px 12px; border-bottom: 1px solid #e2e8f0; color: #475569; }
+  tr:hover { background: #f8fafc; }
+
+  .tldr { background: linear-gradient(135deg, #635bff10, #635bff05); border: 2px solid #635bff; border-radius: 12px; padding: 24px; margin: 32px 0; }
+  .tldr h3 { color: #635bff; margin-top: 0; }
+
+  .footer { background: #f1f5f9; padding: 32px 24px; margin-top: 48px; text-align: center; color: #94a3b8; font-size: 12px; }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <h1>為什麼我們的 Stripe 訂閱架構需要重構</h1>
+  <p class="sub">從 Stripe 官方最佳實踐出發，分析現有架構的問題，以及為什麼「寫入時計算狀態」比「讀取時計算狀態」更好</p>
+</div>
+
+<div class="container">
+
+<!-- ============ TL;DR ============ -->
+<div class="tldr">
+  <h3>TL;DR</h3>
+  <p>我們目前的架構在每次 API 請求時，都用 <span class="hl">4 個 UNION ALL 查詢跨 5 張表</span>即時計算使用者的 tier（免費/付費）。這不是 Stripe 推薦的做法。Stripe 建議：<span class="hl">在 webhook 處理時把狀態寫入資料庫，讀取時直接讀欄位</span>。同時，結帳完成後應該在 <span class="hl">success page 直接呼叫 Stripe API 確認狀態</span>，而不是靠 polling 等 webhook。這個架構問題也導致了生產環境中的「試用期已結束」競態條件錯誤（詳見第 7 節）。</p>
+</div>
+
+<!-- ============ SECTION 1 ============ -->
+<h2><span class="section-num">1</span> 現在的架構長什麼樣</h2>
+
+<p>當使用者打開任何頁面，前端都會呼叫 <code>GET /user/profile</code> 來取得使用者資訊。這個 API 需要回傳幾個關鍵欄位：</p>
+
+<table>
+  <tr><th>欄位</th><th>意義</th><th>怎麼取得</th></tr>
+  <tr><td><code>tier</code></td><td>使用者等級（free / pro）</td><td>即時計算：4 個 UNION ALL 查詢</td></tr>
+  <tr><td><code>everPaid</code></td><td>是否曾經付過款</td><td>即時計算：6 個子查詢</td></tr>
+  <tr><td><code>subscriptionState</code></td><td>訂閱狀態</td><td>即時計算：3 分支 CASE 查詢</td></tr>
+  <tr><td><code>userTrialAvailable</code></td><td>是否可以試用</td><td>即時計算：查詢歷史訂閱</td></tr>
+</table>
+
+<p>這些欄位<span class="bad">全部都不是從資料庫直接讀的</span>，而是每次請求都跨 5 張表即時計算。</p>
+
+<div class="diagram">
+<pre>
+<span class="h">每次 GET /user/profile 的執行流程：</span>
+
+  前端請求 /user/profile
+       │
+       ▼
+  <span class="bad">get_tier(user_hash)</span>                        ~150ms
+    ├── Q1: user_subscription JOIN stripe_subscription_period（個人訂閱 + 有效帳單期間）
+    ├── Q2: team_member JOIN team JOIN user_subscription JOIN stripe_subscription_period（團隊訂閱）
+    ├── Q3: user_subscription 降級查詢（webhook 還沒到的 fallback）
+    └── Q4: team 降級查詢（同上）
+    UNION ALL 合併 → 有任何一個命中 → PRO，否則 FREE
+       │
+       ▼
+  <span class="bad">has_ever_paid(user_hash)</span>                    ~100ms
+    ├── 個人訂閱：JOIN stripe_subscription_period，排除 trial_extension
+    ├── 團隊訂閱：JOIN team_member + stripe_subscription_period
+    ├── 個人 fallback（stripe_subscription_period 還沒建立時）
+    └── 團隊 fallback（同上）
+       │
+       ▼
+  <span class="bad">get_user_subscription_state(user_hash)</span>      ~80ms
+    ├── CASE WHEN: 有帳單期間 + charging_time IS NULL → PAYMENT_FAILED
+    ├── CASE WHEN: 有帳單期間 + charging_time IS NOT NULL → ACTIVE
+    └── CASE WHEN: fallback 只看 gw_subscription_status → ACTIVE
+       │
+       ▼
+  回傳 { tier, everPaid, subscriptionState, ... }
+
+  <span class="bad">總計：~350ms+ 的 SQL 查詢，每次頁面載入都要執行</span>
+</pre>
+</div>
+
+<p>注意：<code>user_info</code> 表上其實<span class="hl">已經有 <code>tier</code> 和 <code>ever_paid_for_pro</code> 這兩個欄位</span>，但它們是「死程式碼」——有欄位卻從不寫入，程式碼裡標記了 <code>TODO: Remove</code>。</p>
+
+<!-- ============ SECTION 2 ============ -->
+<h2><span class="section-num">2</span> 為什麼會變成這樣：Webhook 依賴鏈問題</h2>
+
+<p>要理解為什麼 <code>get_tier()</code> 需要這麼複雜，必須先理解 Stripe 的 webhook 事件是怎麼到達的。</p>
+
+<h3>Stripe 事件到達順序</h3>
+
+<p>當使用者完成結帳後，Stripe 會<span class="hl">依序但不保證順序</span>地發送多個事件：</p>
+
+<div class="diagram">
+<pre>
+<span class="h">使用者按下「訂閱」後，Stripe 發送的事件：</span>
+
+  T+0s   <span class="warn">checkout.session.completed</span>
+           → 只更新 stripe_checkout_session 的狀態
+           → <span class="bad">此時沒有任何訂閱資料！tier 還是 FREE</span>
+
+  T+2s   <span class="warn">customer.subscription.created</span>
+           → 建立 user_subscription（plan、status、effective_time）
+           → <span class="bad">但還沒有 stripe_subscription_period！</span>
+           → <span class="bad">Q1/Q2 需要的 charging_time 還不存在</span>
+
+  T+5s   <span class="warn">invoice.payment_succeeded</span>
+           → 建立 stripe_subscription_period（charging_time、period_start/end）
+           → <span class="good">現在 Q1/Q2 終於可以判斷 tier = PRO 了</span>
+</pre>
+</div>
+
+<p>問題來了：<code>get_tier()</code> 需要<span class="bad">同時</span>用到 <code>user_subscription</code>（來自事件 B）和 <code>stripe_subscription_period</code>（來自事件 C）的資料。但這兩個事件在不同時間到達。</p>
+
+<h3>Fallback 查詢的由來</h3>
+
+<p>因為事件 B 和 C 之間有時間差，所以工程師加了 <span class="hl">fallback 查詢</span>（Q3/Q4）：</p>
+
+<div class="box box-red">
+  <h4>問題：Fallback 查詢是永久的，但它解決的是暫時的問題</h4>
+  <p>Q3/Q4 的存在是為了處理「subscription.created 已到但 invoice.payment_succeeded 還沒到」的<span class="bad">幾秒鐘窗口期</span>。但這個 fallback 是<span class="bad">永久啟用</span>的，它的判斷條件比 Q1/Q2 更寬鬆（不檢查 charging_time），所以在某些邊界情況下會返回錯誤結果。</p>
+</div>
+
+<h3>PR #1064：一個典型的邊界 Bug</h3>
+
+<p>這個 PR 修的就是 <code>has_ever_paid()</code> 的 fallback 邏輯錯誤。問題在於同一個 <code>gw_subscription_id</code> 在 trial → active 轉換時會被重用，導致 trial 期間的 <code>stripe_subscription_period</code> 記錄和付費期間的記錄混在一起。</p>
+
+<p>修復方式是加上 <code>period_start_time >= effective_time</code> 的過濾條件。但這只是在已經很複雜的查詢上<span class="bad">再疊加一層複雜度</span>。根本原因是：我們在讀取時才去分辨「這是 trial 還是付費」，而 webhook handler 在處理事件的當下<span class="hl">其實已經知道答案</span>。</p>
+
+<!-- ============ SECTION 3 ============ -->
+<h2><span class="section-num">3</span> Stripe 官方怎麼說</h2>
+
+<p>查閱 Stripe 官方文件後，我們發現我們的做法<span class="bad">違反了三個核心建議</span>：</p>
+
+<h3>建議一：雙觸發履行（Dual-Trigger Fulfillment）</h3>
+
+<div class="quote">
+  <p>"Webhooks can sometimes be delayed. To optimize your payment flow and guarantee immediate fulfillment when your customer is present, trigger fulfillment from your landing page as well."</p>
+  <p class="src">— docs.stripe.com/checkout/fulfillment</p>
+</div>
+
+<p>Stripe 建議寫一個 <code>fulfill_checkout(session_id)</code> 函式，然後在<span class="hl">兩個地方</span>呼叫它：</p>
+
+<ol>
+  <li><strong>Success page</strong>（使用者結帳完回到網站時）：直接呼叫 Stripe API 取得 session 和 subscription 狀態，立即開通權限。</li>
+  <li><strong>Webhook</strong>（checkout.session.completed）：同一個函式，冪等設計（如果 success page 已經處理過就跳過）。</li>
+</ol>
+
+<p>我們目前<span class="bad">只有 webhook 這條路</span>，前端靠 polling（每秒一次，最多 10 次）來等 webhook 處理完。如果 webhook 延遲超過 10 秒，使用者就會看到錯誤的 FREE 狀態。</p>
+
+<h3>建議二：把狀態存到你的資料庫</h3>
+
+<div class="quote">
+  <p>"Store the status in your database and check when a user accesses your service. This approach helps you avoid hitting rate limits."</p>
+  <p class="src">— docs.stripe.com/billing/subscriptions</p>
+</div>
+
+<div class="quote">
+  <p>"Store customers' credentials and a mapped timestamp value that represents the access expiration date for that customer on your site. When the customer logs in, you check whether the timestamp is still in the future."</p>
+  <p class="src">— docs.stripe.com/billing/subscriptions/webhooks</p>
+</div>
+
+<p>Stripe 明確說：<span class="hl">收到 webhook 時就把狀態寫進你的資料庫</span>，使用者訪問時直接讀欄位。不要每次都去重新計算或查詢 Stripe API。</p>
+
+<p>我們目前的做法恰恰相反：webhook 只寫入原始資料（user_subscription、stripe_subscription_period），然後每次讀取時用 ~490 行的 SQL 去即時推算狀態。</p>
+
+<h3>建議三：Webhook 驅動的權限變更</h3>
+
+<div class="quote">
+  <p>"Provision access to your product when you receive invoice.paid and the subscription status is active. When the subscription changes to canceled or unpaid, revoke access to your product."</p>
+  <p class="src">— docs.stripe.com/billing/subscriptions/webhooks</p>
+</div>
+
+<p>Stripe 的模式是：</p>
+<ul>
+  <li><code>invoice.paid</code> → 開通權限，記錄 access expiration date</li>
+  <li><code>invoice.payment_failed</code> → 標記帳號、通知使用者</li>
+  <li><code>subscription.deleted</code> → 撤銷權限</li>
+</ul>
+
+<p>注意：Stripe 說的是「開通/撤銷權限」，也就是<span class="hl">改變你資料庫裡的狀態</span>，而不是「記錄事件原始資料然後讓讀取端自己算」。</p>
+
+<!-- ============ SECTION 4 ============ -->
+<h2><span class="section-num">4</span> 核心問題：讀取時計算 vs 寫入時計算</h2>
+
+<p>我們的架構問題可以用一句話總結：</p>
+
+<div class="box box-red">
+  <h4>我們把工作放在了錯誤的地方</h4>
+  <p><span class="bad">寫入（webhook）很少發生</span>（使用者訂閱、續費、取消——一個月可能就幾次），但<span class="bad">讀取（API 請求）不斷發生</span>（每次頁面載入、每次 polling）。我們把計算邏輯放在讀取端，等於是把少量事件的複雜性分攤到了大量請求上。</p>
+</div>
+
+<div class="compare">
+  <div class="box box-red">
+    <h4>❌ 現在：讀取時計算（Read-Heavy）</h4>
+    <p><strong>寫入路徑</strong>（webhook）：</p>
+    <ul>
+      <li>把原始資料存到 user_subscription</li>
+      <li>把帳單期間存到 stripe_subscription_period</li>
+      <li>完成。不做任何狀態推算。</li>
+    </ul>
+    <p><strong>讀取路徑</strong>（每次 API 請求）：</p>
+    <ul>
+      <li>4 個 UNION ALL 跨 5 張表算 tier</li>
+      <li>6 個子查詢算 ever_paid</li>
+      <li>3 分支 CASE 算 subscription_state</li>
+      <li>~350ms，~490 行 SQL</li>
+    </ul>
+  </div>
+  <div class="box box-green">
+    <h4>✅ 應該：寫入時計算（Write-Heavy）</h4>
+    <p><strong>寫入路徑</strong>（webhook）：</p>
+    <ul>
+      <li>原有邏輯不變（寫 user_subscription 等）</li>
+      <li><strong>新增：</strong>UPDATE user_info SET tier, ever_paid, subscription_state</li>
+      <li>每個 handler 多 ~5 行程式碼</li>
+    </ul>
+    <p><strong>讀取路徑</strong>（每次 API 請求）：</p>
+    <ul>
+      <li>SELECT tier, ever_paid, subscription_state FROM user_info</li>
+      <li>~1ms，索引主鍵查詢</li>
+      <li>不需要 JOIN、不需要 fallback</li>
+    </ul>
+  </div>
+</div>
+
+<h3>為什麼 Stripe 認為寫入時計算更好？</h3>
+
+<p>有三個原因：</p>
+
+<div class="box box-blue">
+  <h4>原因 1：寫入時擁有完整上下文</h4>
+  <p>當 <code>invoice.payment_succeeded</code> webhook 到達時，handler 已經知道：這是 trial 的 $0 invoice 還是真正的付費、billing_reason 是 subscription_create 還是 subscription_cycle、plan 是什麼、recurrence 是什麼。<span class="hl">所有判斷條件在寫入當下都是已知的</span>，不需要事後再去推算。</p>
+  <p>而讀取時計算（如 <code>has_ever_paid()</code>）必須從冰冷的資料庫記錄中<span class="bad">反向推理</span>這些答案，所以才需要 trial_extension 排除邏輯、period_start_time >= effective_time 等複雜條件。</p>
+</div>
+
+<div class="box box-blue">
+  <h4>原因 2：寫少讀多</h4>
+  <p>一個使用者的訂閱狀態變化（建立、續費、升級、取消）一個月可能只發生 1-2 次。但 <code>GET /user/profile</code> 在每次頁面載入、每次 polling、每次路由切換時都會被呼叫。<span class="hl">在寫入時多做 5 行工作，可以省下讀取時 350ms × N 次的計算。</span></p>
+</div>
+
+<div class="box box-blue">
+  <h4>原因 3：消除 Fallback 的必要性</h4>
+  <p>讀取時計算之所以需要 fallback，是因為不同 webhook 事件在不同時間寫入不同的表。讀取端不知道「到底是 webhook 還沒到，還是這個使用者真的不是 PRO」。</p>
+  <p>但如果在寫入時就更新 <code>user_info.tier</code>，那麼：</p>
+  <ul>
+    <li><code>subscription.created</code> handler 寫入 tier = PRO → 讀取端立刻看到 PRO</li>
+    <li>不需要等 <code>invoice.payment_succeeded</code> 才能確認</li>
+    <li>不需要 fallback 查詢</li>
+    <li>不需要 trial/active 的區分邏輯（handler 已經知道）</li>
+  </ul>
+</div>
+
+<!-- ============ SECTION 5 ============ -->
+<h2><span class="section-num">5</span> 完整的修復方案</h2>
+
+<p>結合 Stripe 官方建議和我們的實際情況，推薦的架構有四層：</p>
+
+<h3>第一層：結帳履行（Dual-Trigger）</h3>
+
+<div class="diagram">
+<pre>
+<span class="h">新增 fulfill_checkout(session_id) 函式：</span>
+
+  <span class="good">觸發點 A：Success Page（使用者看得到，即時）</span>
+    使用者結帳完 → 跳轉到 /checkout-success?session_id=cs_xxx
+    → 後端呼叫 stripe.checkout.Session.retrieve(session_id)
+    → 取得 subscription 狀態
+    → 寫入 user_info: tier=PRO, subscription_state=ACTIVE
+    → 建立 user_subscription 記錄
+    → 回傳給前端 → <span class="good">使用者立刻看到 PRO，不需要 polling！</span>
+
+  <span class="good">觸發點 B：Webhook（可靠，涵蓋所有情況）</span>
+    checkout.session.completed 事件到達
+    → 呼叫同一個 fulfill_checkout(session_id)
+    → 檢查：如果已經處理過 → 跳過（冪等）
+    → 如果還沒處理 → 執行同樣的邏輯
+    → <span class="info">覆蓋使用者沒有訪問 success page 的情況（關掉瀏覽器等）</span>
+</pre>
+</div>
+
+<p>這正是 Stripe 說的：<em>"trigger fulfillment from your landing page as well"</em>。兩條路呼叫同一個冪等函式，誰先到誰處理。</p>
+
+<h3>第二層：訂閱生命週期（Webhook 物化狀態）</h3>
+
+<p>結帳之後的所有狀態變更（續費、付款失敗、取消、升降級）都發生在使用者不在場的時候，只能靠 webhook。但 webhook handler 處理完原有邏輯後，<span class="hl">多做一步：更新 user_info</span>。</p>
+
+<table>
+  <tr><th>Webhook 事件</th><th>現有邏輯（保留）</th><th>新增：更新 user_info</th></tr>
+  <tr>
+    <td><code>subscription.created</code></td>
+    <td>建立 user_subscription</td>
+    <td><code>SET tier=PRO, subscription_state=status</code></td>
+  </tr>
+  <tr>
+    <td><code>subscription.updated</code></td>
+    <td>過期舊紀錄、建立新 user_subscription</td>
+    <td><code>SET tier=derive(plan), subscription_state=new_status</code></td>
+  </tr>
+  <tr>
+    <td><code>subscription.deleted</code></td>
+    <td>設定 cancel_at、expiry_time</td>
+    <td><code>SET tier=FREE（如無其他活躍訂閱）, subscription_state=INACTIVE</code></td>
+  </tr>
+  <tr>
+    <td><code>invoice.paid</code></td>
+    <td>Upsert stripe_subscription_period</td>
+    <td><code>SET ever_paid=TRUE（如非 trial $0 invoice）</code></td>
+  </tr>
+  <tr>
+    <td><code>invoice.payment_failed</code></td>
+    <td>Upsert stripe_subscription_period</td>
+    <td><code>SET subscription_state=PAYMENT_FAILED</code></td>
+  </tr>
+</table>
+
+<p>每個 handler 只需要多加 ~5 行程式碼。現有的原始資料寫入完全保留（audit trail）。</p>
+
+<h3>第三層：存取檢查（簡單讀取）</h3>
+
+<div class="diagram">
+<pre>
+<span class="h">修改前（現在）：</span>
+  GET /user/profile
+    → get_tier()                       4 UNION ALL, 5 表 JOIN   <span class="bad">~150ms</span>
+    → has_ever_paid()                  6 子查詢, trial 排除     <span class="bad">~100ms</span>
+    → get_user_subscription_state()    3 分支 CASE + fallback   <span class="bad">~80ms</span>
+    <span class="bad">總計 ~350ms+，~490 行 SQL 邏輯</span>
+
+<span class="h">修改後（目標）：</span>
+  GET /user/profile
+    → SELECT tier, ever_paid, subscription_state FROM user_info WHERE user_hash = ?
+    <span class="good">總計 ~1ms，索引主鍵查詢，10 行程式碼</span>
+</pre>
+</div>
+
+<h3>第四層：安全網（定期校正）</h3>
+
+<p>任何物化狀態都可能因為 webhook 失敗、bug、或 Stripe 手動操作而產生偏差。所以需要一個<span class="hl">每日校正任務</span>：</p>
+
+<ul>
+  <li>對所有 tier=PRO 的使用者，呼叫 Stripe API 確認確實有活躍訂閱</li>
+  <li>對所有 tier=FREE 的使用者，檢查是否有我們漏掉的活躍訂閱</li>
+  <li>發現不一致時：修正資料庫 + 發送告警</li>
+</ul>
+
+<!-- ============ SECTION 6 ============ -->
+<h2><span class="section-num">6</span> 遷移策略（零停機）</h2>
+
+<p>這個重構可以分 5 個階段安全執行，不需要一次性切換：</p>
+
+<div class="box box-amber">
+  <h4>Phase 1：雙寫（Dual Write）</h4>
+  <p>Webhook handler 開始寫入 <code>user_info.tier</code> 等欄位，但讀取路徑<strong>不變</strong>，還是用舊的 get_tier()。風險為零：寫入是附加的，讀取不受影響。</p>
+</div>
+
+<div class="box box-amber">
+  <h4>Phase 2：回填（Backfill）</h4>
+  <p>跑一次腳本，對所有使用者呼叫現有的 get_tier() 和 has_ever_paid()，把結果寫入 user_info 欄位。確保所有歷史使用者都有正確的物化狀態。</p>
+</div>
+
+<div class="box box-amber">
+  <h4>Phase 3：影子讀取（Shadow Read）</h4>
+  <p>讀取路徑同時呼叫新舊兩種方式，比較結果。如果不一致，記錄到監控系統。跑 1-2 週確認新舊一致。</p>
+</div>
+
+<div class="box box-amber">
+  <h4>Phase 4：切換讀取</h4>
+  <p>讀取路徑改為直接讀 user_info 欄位。即時省下 ~350ms/request。</p>
+</div>
+
+<div class="box box-amber">
+  <h4>Phase 5：清理</h4>
+  <p>刪除 get_tier()（150 行）、has_ever_paid()（130 行）、get_user_subscription_state()（130 行）等。移除 fallback 查詢。移除前端的 useSubscriptionStatePolling。刪除 get_tier 的索引遷移。<strong>總共刪除 ~490 行複雜 SQL 邏輯。</strong></p>
+</div>
+
+<!-- ============ SECTION 7 ============ -->
+<h2><span class="section-num">7</span> 實際案例：「試用期已結束」錯誤</h2>
+
+<p>我們在生產環境中觀察到多起錯誤訊息：</p>
+
+<div class="box box-red">
+  <h4>錯誤訊息</h4>
+  <p><code>"Your trial period has already ended or your subscription is not in trial status. No action is needed."</code></p>
+  <p>來源：<code>payment/router.py</code> 的 <code>POST /subscription/end-trial</code> endpoint</p>
+</div>
+
+<p>這個 endpoint 的邏輯是：</p>
+<ol>
+  <li>呼叫 <code>get_user_active_subscription()</code> 查詢最新的訂閱</li>
+  <li>檢查 <code>gw_subscription_status == 'trialing'</code></li>
+  <li>如果不是 trialing → 拋出錯誤</li>
+  <li>呼叫 Stripe API 設定 <code>trial_end = now + 1s</code></li>
+</ol>
+
+<p>根本原因是：<span class="bad">Trial 的到期時間由 Stripe 控制，我們的 FE/BE 都不知道確切的到期時刻</span>。我們只能靠 webhook 得知 trial 已結束，但 webhook 有延遲，導致 DB 狀態與 Stripe 實際狀態不同步。</p>
+
+<h3>核心問題：我們不知道 Trial 何時結束</h3>
+
+<div class="box box-red">
+  <h4>Trial 到期是 Stripe 的事，不是我們的事</h4>
+  <p>當使用者開始試用時，Stripe 設定了一個 <code>trial_end</code> 時間戳。到期時，<span class="bad">Stripe 自動將 subscription status 從 trialing 改為 active</span>，然後發送 <code>subscription.updated</code> webhook 通知我們。</p>
+  <p>問題是：我們的前端和後端<span class="bad">都不知道這個轉換何時發生</span>。我們唯一的信息來源就是 webhook——但 webhook 可能延遲數秒甚至數分鐘。</p>
+</div>
+
+<h3>情境一：Trial 自然到期，Webhook 已到（最常見）</h3>
+
+<div class="diagram">
+<pre>
+<span class="h">使用者看到過時的 UI：</span>
+
+  T+0      使用者開始試用
+           subscription.created → <span class="info">gw_subscription_status = 'trialing'</span>
+
+  T+7天    <span class="warn">Trial 到期</span>（由 Stripe 控制，我們的 FE/BE 不知道）
+           Stripe 自動將 subscription status 改為 active
+           Stripe 發送 <span class="warn">subscription.updated</span> webhook
+
+  T+7天    Webhook 到達 → handle_customer_subscription_updated()
+    +2s      ├── 過期舊 user_subscription（trialing）
+             └── 建立新 user_subscription（<span class="good">status = 'active'</span>）
+
+  T+7天    使用者開啟頁面（或頁面還停留在舊狀態）
+    +10s     → 前端顯示「結束試用」按鈕（<span class="bad">基於上次取得的 profile，此時已過時</span>）
+             → 使用者點擊「結束試用」
+             → end_trial 讀取 DB: gw_subscription_status = <span class="bad">'active'</span>
+             → <span class="bad">拋出錯誤：「試用期已結束」</span>
+
+  <span class="dim">根本原因：前端不知道 trial 已自然到期。</span>
+  <span class="dim">Webhook 已更新 DB，但前端還在顯示過時的 UI。</span>
+</pre>
+</div>
+
+<h3>情境二：Trial 到期但 Webhook 延遲</h3>
+
+<div class="diagram">
+<pre>
+<span class="h">DB 狀態落後於 Stripe 實際狀態：</span>
+
+  T+7天    <span class="warn">Trial 到期</span>（Stripe 側已經是 active）
+    +0s      但 webhook 還沒到達
+             DB 中 gw_subscription_status 還是 <span class="bad">'trialing'</span>（過時！）
+
+  T+7天    使用者點擊「結束試用」
+    +1s      → end_trial 讀取 DB: gw_subscription_status = 'trialing' <span class="good">✓ 通過本地檢查</span>
+             → 呼叫 Stripe API: trial_end = now + 1s
+             → <span class="bad">Stripe 回傳錯誤：subscription 已經不是 trialing</span>
+             → 或者 Stripe 接受了（因為剛剛才轉換），但效果不確定
+
+  T+7天    Webhook 終於到達
+    +5s      → 更新 DB 為 active
+             → <span class="bad">DB 狀態和之前 end_trial 的操作可能衝突</span>
+
+  <span class="dim">根本原因：我們的 DB 比 Stripe 慢了好幾秒。</span>
+  <span class="dim">本地狀態檢查通過了，但 Stripe 上的真實狀態已經不同。</span>
+</pre>
+</div>
+
+<h3>情境三：使用者在 Trial 到期邊界操作</h3>
+
+<div class="diagram">
+<pre>
+<span class="h">時間差造成的模糊地帶：</span>
+
+  T+7天    使用者在 trial 到期前幾秒點擊「結束試用」
+    -3s      → end_trial 讀取 DB: gw_subscription_status = 'trialing' <span class="good">✓</span>
+             → 呼叫 Stripe API: trial_end = now + 1s
+
+  T+7天    <span class="warn">就在 API 呼叫的同時，Stripe 自動讓 trial 到期</span>
+    +0s      → Stripe 發送 subscription.updated（trialing → active）
+
+  T+7天    兩件事同時發生：
+    +1s      A) 我們的 trial_end = now + 1s 請求到達 Stripe
+             B) Stripe 的自動到期 webhook 到達我們
+             → <span class="bad">結果取決於哪個先被處理，行為不確定</span>
+
+  <span class="dim">根本原因：Trial 到期是 Stripe 控制的時間點，</span>
+  <span class="dim">我們無法預測它和使用者操作之間的先後順序。</span>
+</pre>
+</div>
+
+<h3>為什麼這是架構的根本問題</h3>
+
+<div class="box box-red">
+  <h4>我們完全依賴 Webhook 來同步 Trial 狀態</h4>
+  <p>問題的核心是：<span class="hl">Trial 何時到期是 Stripe 決定的，我們的 FE/BE 都無法提前知道</span>。我們只能被動等待 <code>subscription.updated</code> webhook 到達後才更新 DB。</p>
+  <p>這產生了一個<span class="bad">不可避免的時間窗口</span>：Stripe 上的 subscription 已經從 trialing 變成 active，但我們的 DB 還沒收到通知。在這個窗口內：</p>
+  <ul>
+    <li>前端 UI 顯示過時的 trialing 狀態（因為 <code>GET /user/profile</code> 讀到舊資料）</li>
+    <li>後端的 <code>gw_subscription_status</code> 檢查基於過時的 DB 狀態</li>
+    <li>使用者的操作（點擊「結束試用」）基於錯誤的前提</li>
+  </ul>
+  <p>這跟 <code>get_tier()</code> 和 <code>has_ever_paid()</code> 的問題如出一轍：<span class="hl">我們的系統依賴 webhook 來同步狀態，但 webhook 有延遲，而我們沒有任何機制來處理這個延遲</span>。</p>
+</div>
+
+<h3>新架構如何解決</h3>
+
+<div class="box box-green">
+  <h4>不信任本地 DB，直接問 Stripe</h4>
+  <p>在新架構下，<code>end_trial</code> endpoint 會：</p>
+  <ol>
+    <li><strong>跳過本地狀態檢查</strong>：不讀 DB 的 <code>gw_subscription_status</code></li>
+    <li><strong>直接呼叫 Stripe API</strong> 結束試用 → Stripe 是 trial 狀態的<span class="hl">唯一真相來源（Single Source of Truth）</span></li>
+    <li>如果 Stripe 回傳成功 → 基於回傳值寫入 <code>user_info</code>（tier、subscription_state）</li>
+    <li>如果 Stripe 回傳「不是 trialing」→ 表示 trial 已自然到期 → <span class="good">回傳成功</span>（使用者的意圖已達成）</li>
+    <li>後到的 webhook 做冪等檢查 → 已處理過就跳過</li>
+  </ol>
+  <p>關鍵改變：<span class="good">讓 Stripe 而非我們的 DB 來判斷 trial 是否還在進行中</span>。Stripe 是管理 trial 的那一方，它永遠知道正確答案。</p>
+</div>
+
+<h3>短期修復（在全面重構之前）</h3>
+
+<div class="box box-amber">
+  <h4>三個可立即實施的改善</h4>
+  <ol>
+    <li><strong>移除本地前置檢查</strong>：不在 DB 檢查 trialing 狀態，直接呼叫 Stripe API。Stripe 知道 trial 是否還在，我們不需要猜。如果 Stripe 說不行，再回傳對應的錯誤給使用者</li>
+    <li><strong>冪等處理</strong>：如果 Stripe 回傳訂閱已經是 active（trial 已自然到期），回傳成功而非錯誤——使用者的意圖是「開始付費」，而這已經發生了</li>
+    <li><strong>前端即時狀態</strong>：在 end_trial 頁面載入時重新取得 <code>/user/profile</code>，如果訂閱已不是 trialing 就隱藏「結束試用」按鈕，減少使用者看到過時 UI 的機會</li>
+  </ol>
+</div>
+
+<!-- ============ SECTION 8 ============ -->
+<h2><span class="section-num">8</span> 常見疑問：這樣不是要打很多 Stripe API？</h2>
+
+<p>一個常見的疑問是：「如果不信任本地 DB，改成直接問 Stripe，不是要打很多 API 嗎？」</p>
+
+<p>答案是：<span class="good">不會</span>。因為讀取和寫入是完全不同的場景。</p>
+
+<h3>讀取（高頻）→ 讀 DB，不碰 Stripe</h3>
+
+<p>每次頁面載入的 <code>GET /user/profile</code> 讀的是 <code>user_info</code> 表的物化欄位。這是前面說的 write-time materialization：<span class="hl">webhook 到達時寫入 DB，讀取時直接 SELECT，Stripe API 呼叫次數 = 0</span>。</p>
+
+<h3>寫入（低頻）→ 本來就要呼叫 Stripe</h3>
+
+<p>像 end-trial、結帳這些使用者操作，<span class="hl">本來就需要呼叫 Stripe API</span>。改的只是移除前面不可靠的 DB 前置檢查，Stripe API 呼叫次數不變（甚至更少）。</p>
+
+<div class="diagram">
+<pre>
+<span class="h">end_trial 的 Stripe API 呼叫次數比較：</span>
+
+  <span class="bad">現在：</span>
+    1. 讀 DB 檢查 gw_subscription_status == 'trialing'     ← 可能過時
+    2. 呼叫 Stripe API: subscriptions.modify()              ← <span class="info">1 次 API call</span>
+    <span class="dim">如果步驟 1 失敗（trial 已到期）→ 直接拋錯，不呼叫 Stripe</span>
+    <span class="dim">問題：本該成功的操作被過時的 DB 狀態擋掉了</span>
+
+  <span class="good">改後：</span>
+    1. 直接呼叫 Stripe API: subscriptions.modify()          ← <span class="info">1 次 API call（一樣）</span>
+    2. 根據 Stripe 回傳值更新 DB
+    <span class="dim">Stripe 是 trial 狀態的 source of truth，由它來判斷</span>
+</pre>
+</div>
+
+<h3>各場景的 API 呼叫量對比</h3>
+
+<table>
+  <tr><th>場景</th><th>頻率</th><th>現在的 Stripe API 呼叫</th><th>改後的 Stripe API 呼叫</th></tr>
+  <tr>
+    <td>頁面載入（讀 tier）</td>
+    <td><strong>極高</strong>（每次載入）</td>
+    <td>0 次（但 350ms SQL）</td>
+    <td>0 次（1ms DB 讀取）</td>
+  </tr>
+  <tr>
+    <td>結帳完成</td>
+    <td>低（每次購買）</td>
+    <td>0 次（等 webhook + 10s polling）</td>
+    <td><span class="good">+1 次</span> session.retrieve（換來即時開通）</td>
+  </tr>
+  <tr>
+    <td>End trial</td>
+    <td>低（每人最多一次）</td>
+    <td>1 次 subscriptions.modify</td>
+    <td>1 次 subscriptions.modify（<span class="good">一樣</span>）</td>
+  </tr>
+  <tr>
+    <td>續費 / 取消 / 付款失敗</td>
+    <td>低（webhook 驅動）</td>
+    <td>0 次</td>
+    <td>0 次（webhook 寫入 + 更新 user_info）</td>
+  </tr>
+  <tr>
+    <td>每日校正</td>
+    <td>1 次/天（離線）</td>
+    <td>不存在</td>
+    <td>批次 list subscriptions（<span class="good">離線，不在請求路徑上</span>）</td>
+  </tr>
+</table>
+
+<div class="box box-blue">
+  <h4>Stripe Rate Limit：完全不是問題</h4>
+  <p>Stripe live mode 的 rate limit 是 <strong>100 req/s</strong>。我們的寫入操作（結帳、end-trial、取消）一天可能就幾百次，遠低於限制。唯一高頻的場景是頁面載入讀 tier，而那<span class="hl">完全不呼叫 Stripe</span>——改前改後都是讀自己的 DB。</p>
+  <p>唯一新增的 Stripe API 呼叫是：</p>
+  <ul>
+    <li><strong>Success page</strong>：多一次 <code>checkout.session.retrieve()</code>，但這換來的是消除 10 秒 polling 和即時開通體驗</li>
+    <li><strong>每日校正</strong>：離線批次跑，用 <code>subscriptions.list</code> 拉資料，不在使用者請求路徑上</li>
+  </ul>
+</div>
+
+<!-- ============ SECTION 9 ============ -->
+<h2><span class="section-num">9</span> 總結</h2>
+
+<table>
+  <tr><th></th><th>現在（Read-Heavy）</th><th>目標（Write-Heavy）</th></tr>
+  <tr><td><strong>結帳體驗</strong></td><td>Webhook-only + 10s polling</td><td>Success page 直接確認 + webhook 備援</td></tr>
+  <tr><td><strong>狀態儲存</strong></td><td>不存，每次即時計算</td><td>寫入 user_info 欄位</td></tr>
+  <tr><td><strong>讀取速度</strong></td><td>~350ms（4 UNION ALL + 6 子查詢）</td><td>~1ms（索引主鍵查詢）</td></tr>
+  <tr><td><strong>程式碼量</strong></td><td>~490 行 SQL 邏輯</td><td>~10 行讀取 + ~30 行寫入</td></tr>
+  <tr><td><strong>Fallback</strong></td><td>永久啟用，容易出 bug（PR #1064、end-trial 競態）</td><td>不需要</td></tr>
+  <tr><td><strong>安全網</strong></td><td>無（失敗事件永久 desync）</td><td>每日校正 + webhook retry</td></tr>
+  <tr><td><strong>Stripe API 呼叫</strong></td><td>讀取 0 次、寫入 N 次</td><td>讀取 0 次、寫入 N 次（基本不變）</td></tr>
+  <tr><td><strong>符合 Stripe 建議</strong></td><td>❌ 違反 3 項建議</td><td>✅ 完全符合</td></tr>
+</table>
+
+<div class="box box-green">
+  <h4>一句話總結</h4>
+  <p>Webhook 處理事件的當下擁有最完整的上下文——它知道這是 trial 還是付費、是建立還是取消、是個人還是團隊。<span class="hl">在那個時刻把狀態寫死</span>，比事後讓每個讀取請求從碎片化的資料中反向推理，要簡單、快速、正確得多。使用者操作（如 end-trial）直接問 Stripe 要答案，不信任可能過時的本地 DB。<span class="hl">高頻讀取走 DB，低頻寫入走 Stripe API</span>——API 呼叫量基本不變，但正確性和速度大幅提升。這也是 Stripe 推薦的做法。</p>
+</div>
+
+</div>
+
+<div class="footer">
+  DLAI Platform Engineering · Stripe Subscription Architecture Review · 2026-03
+</div>
+
+</body>
+</html>

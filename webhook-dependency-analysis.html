@@ -1,0 +1,613 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Webhook Dependency Problem & Simplified Architecture Sketch</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace; background: #0a0a0f; color: #e0e0e0; padding: 24px; min-height: 100vh; }
+  h1 { text-align: center; font-size: 20px; color: #7dd3fc; margin-bottom: 6px; letter-spacing: 1px; }
+  .subtitle { text-align: center; color: #64748b; font-size: 12px; margin-bottom: 24px; }
+  .grid { max-width: 1440px; margin: 0 auto; }
+  .section { font-size: 15px; font-weight: 700; color: #e2e8f0; margin: 24px 0 14px; padding-bottom: 6px; border-bottom: 1px solid #1e293b; }
+  .row { display: grid; gap: 20px; margin-bottom: 20px; }
+  .row-2 { grid-template-columns: 1fr 1fr; }
+  .row-3 { grid-template-columns: 1fr 1fr 1fr; }
+  .card { background: #111118; border: 1px solid #1e293b; border-radius: 10px; padding: 16px; }
+  .card-title { font-size: 13px; font-weight: 700; color: #f1f5f9; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+  .badge { font-size: 10px; padding: 2px 7px; border-radius: 4px; font-weight: 600; }
+  .badge-red { background: #450a0a; color: #fca5a5; }
+  .badge-green { background: #14532d; color: #86efac; }
+  .badge-amber { background: #451a03; color: #fbbf24; }
+  .badge-blue { background: #1e3a5f; color: #7dd3fc; }
+  .badge-purple { background: #3b0764; color: #c4b5fd; }
+  pre { font-size: 11px; line-height: 1.7; color: #94a3b8; overflow-x: auto; }
+  pre .h { color: #f1f5f9; font-weight: 700; }
+  pre .webhook { color: #fbbf24; }
+  pre .table { color: #c4b5fd; }
+  pre .field { color: #fb923c; }
+  pre .good { color: #86efac; }
+  pre .bad { color: #f87171; }
+  pre .info { color: #38bdf8; }
+  pre .dim { color: #475569; }
+  pre .strike { text-decoration: line-through; color: #dc2626; }
+  .callout { background: #1a1a2e; border-left: 3px solid #7dd3fc; padding: 10px 14px; border-radius: 0 6px 6px 0; margin: 8px 0; }
+  .callout p { font-size: 11px; color: #94a3b8; line-height: 1.6; }
+  .callout .hl { color: #fbbf24; font-weight: 600; }
+  .callout-red { border-left-color: #f87171; background: #1a0a0a; }
+  .callout-green { border-left-color: #86efac; background: #0a1a0a; }
+  .metric { display: inline-block; background: #1e293b; border-radius: 6px; padding: 4px 10px; margin: 2px 4px; font-size: 11px; }
+  .metric .num { color: #fbbf24; font-weight: 700; }
+  .metric .lbl { color: #64748b; }
+  @media (max-width: 900px) { .row-2, .row-3 { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+
+<h1>Webhook Dependency Problem & Simplified Architecture</h1>
+<p class="subtitle">Why get_tier, has_ever_paid, and get_user_subscription_state are complex -- and how to fix it</p>
+
+<div class="grid">
+
+<!-- ============ SECTION 1: THE WEBHOOK DEPENDENCY CHAIN ============ -->
+<div class="section">1. The Root Cause: Webhook Event Dependency Chain</div>
+
+<div class="card" style="margin-bottom:20px">
+<pre>
+<span class="h">STRIPE FIRES THESE EVENTS (in roughly this order, but NOT guaranteed):</span>
+
+  <span class="webhook">checkout.session.completed</span>  ------>  Updates: <span class="table">stripe_checkout_session</span> state=COMPLETE
+          |                                <span class="dim">// No subscription data yet!</span>
+          v
+  <span class="webhook">customer.subscription.created</span> --->  Creates: <span class="table">user_subscription</span> (status=trialing|active)
+          |                                <span class="dim">// Has: plan, recurrence, gw_subscription_status</span>
+          |                                <span class="dim">// Missing: NO stripe_subscription_period yet!</span>
+          v
+  <span class="webhook">invoice.payment_succeeded</span>  ------>  Creates: <span class="table">stripe_subscription_period</span> (charging_time set)
+                                           <span class="dim">// NOW we have all the data needed for tier</span>
+
+<span class="h">THE PROBLEM:</span> Each query needs data from MULTIPLE webhook events that arrive at DIFFERENT times.
+
+  <span class="bad">get_tier()</span> needs:
+    - <span class="table">user_subscription</span>.gw_subscription_status   <-- from <span class="webhook">subscription.created</span>
+    - <span class="table">stripe_subscription_period</span>.charging_time   <-- from <span class="webhook">invoice.payment_succeeded</span>
+    - <span class="table">stripe_subscription_period</span>.period_end_time <-- from <span class="webhook">invoice.payment_succeeded</span>
+    <span class="bad">Gap: subscription.created arrives but invoice.payment_succeeded hasn't yet</span>
+    <span class="bad">Solution: Fallback queries Q3/Q4 that trust gw_subscription_status alone</span>
+
+  <span class="bad">has_ever_paid()</span> needs:
+    - <span class="table">user_subscription</span>.gw_subscription_status   <-- from <span class="webhook">subscription.created</span>
+    - <span class="table">stripe_subscription_period</span>.charging_time   <-- from <span class="webhook">invoice.payment_succeeded</span>
+    - <span class="table">user_subscription</span>.effective_time           <-- from <span class="webhook">subscription.created/updated</span>
+    <span class="bad">Gap: same as above, PLUS trial-to-active reuses same subscription_id</span>
+    <span class="bad">Solution: Fallback queries + trial_extension exclusion + period_start >= effective_time (PR #1064 fix!)</span>
+
+  <span class="bad">get_user_subscription_state()</span> needs:
+    - <span class="table">user_subscription</span> existence + status        <-- from <span class="webhook">subscription.created</span>
+    - <span class="table">stripe_subscription_period</span>.charging_time   <-- from <span class="webhook">invoice.payment_succeeded</span>
+    - <span class="table">team</span>.deactivated_at                        <-- from <span class="webhook">subscription.deleted</span>
+    <span class="bad">Gap: same dependency on period record existing</span>
+    <span class="bad">Solution: Fallback to gw_subscription_status when no period exists</span>
+</pre>
+</div>
+
+<div class="row row-2">
+  <div class="card">
+    <div class="card-title">get_tier() Has the SAME Problem <span class="badge badge-red">Yes</span></div>
+<pre>
+<span class="h">get_tier() vulnerability analysis:</span>
+
+<span class="bad">Q1 (Primary): Personal sub + valid period</span>
+  Requires: <span class="table">stripe_subscription_period</span>
+    - charging_time IS NOT NULL
+    - period_start_time <= now <= period_end_time
+    - Joins on gw_subscription_id
+  <span class="bad">Fails when: invoice.payment_succeeded hasn't arrived yet</span>
+
+<span class="bad">Q2 (Primary): Team sub + valid period</span>
+  Same as Q1 but adds: team_member + team JOINs
+  <span class="bad">Fails when: same + team membership timing edge cases</span>
+
+<span class="info">Q3 (Fallback): Personal sub without period</span>
+  Trusts: gw_subscription_status == ACTIVE
+  No period join needed
+  <span class="bad">BUT: doesn't check charging_time, so TRIALING users</span>
+  <span class="bad">who got subscription.created with status=active</span>
+  <span class="bad">would pass even without payment (trial upgrade edge case)</span>
+
+<span class="info">Q4 (Fallback): Team sub without period</span>
+  Same as Q3 for teams
+
+<span class="bad">KEY ISSUE: Q3/Q4 are LESS strict than Q1/Q2</span>
+<span class="bad">They exist ONLY to cover webhook delays but are</span>
+<span class="bad">permanently enabled, creating a weaker code path</span>
+<span class="bad">that could return PRO for edge cases that Q1/Q2</span>
+<span class="bad">would correctly reject.</span>
+</pre>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Complexity Metrics <span class="badge badge-amber">Current State</span></div>
+<pre>
+<span class="h">Lines of SQL logic per function:</span>
+  <span class="field">get_tier()</span>              ~150 lines, 4 UNION ALL queries, 5 table JOINs
+  <span class="field">has_ever_paid()</span>          ~130 lines, 6 subqueries, trial_extension logic
+  <span class="field">get_user_subscription_state()</span>  ~130 lines, CASE with 3 branches + fallback
+  <span class="field">get_user_subscription_state_by_plan()</span>  ~80 lines, similar pattern
+
+<span class="h">Callers (all called on EVERY request):</span>
+  <span class="field">get_tier()</span>           - user/router (profile x2), course/router,
+                         curriculum/router, specialization/router,
+                         payment/router, operations/services
+  <span class="field">has_ever_paid()</span>      - user/router (profile x2, public profile)
+  <span class="field">get_subscription_state()</span> - user/router (profile, per-team),
+                              payment/router, team/router
+
+<span class="h">Total DB queries per /user/profile call:</span>
+  <span class="num">1</span> get_tier()                  (~150ms, 4 UNION ALL)
+  <span class="num">1</span> has_ever_paid()             (~100ms, 6 subqueries)
+  <span class="num">1</span> get_user_subscription_state() (~80ms)
+  <span class="num">1</span> user_eligible_to_trial()    (~20ms)
+  <span class="num">N</span> get_user_subscription_state() per team (~80ms each)
+  <span class="bad">= ~350ms+ of pure SQL per profile request</span>
+  <span class="bad">= multiplied by every page load, every poll</span>
+
+<span class="h">Bugs caused by this complexity:</span>
+  PR #1064: has_ever_paid fallback wrong for trial users
+  PR #908:  subscription state logic discussion
+  Multiple TODO/NOTE comments about edge cases
+  <span class="dim">// "New subscriptions before Stripe webhook creates the period record"</span>
+  <span class="dim">// "Legacy subscriptions without period records"</span>
+</pre>
+  </div>
+</div>
+
+<!-- ============ SECTION 2: THE WEBHOOK EVENT TIMELINE ============ -->
+<div class="section">2. Webhook Timeline: Where Each Piece of Data Becomes Available</div>
+
+<div class="card" style="margin-bottom:20px">
+<pre>
+<span class="h">TIMELINE: New Pro Monthly Subscription (with trial)</span>
+
+T=0s   User clicks "Start Free Trial" on learnext
+       Frontend calls POST /checkout-session
+       Backend creates Stripe checkout session
+       Saves: <span class="table">stripe_checkout_session</span> (state=OPEN)
+
+T=30s  User completes payment on Stripe page
+       Stripe redirects to /checkout-success
+       Frontend starts polling (1s x 10 = 10s window)
+
+T=31s  <span class="webhook">checkout.session.completed</span> webhook arrives
+       Updates: <span class="table">stripe_checkout_session</span> state=COMPLETE
+       <span class="bad">tier=FREE, ever_paid=false, sub_state=never_subscribed (no change yet)</span>
+
+T=32s  <span class="webhook">customer.subscription.created</span> webhook arrives
+       Creates: <span class="table">user_subscription</span>
+         gw_subscription_status = 'trialing'
+         plan = 'pro', recurrence = 'month'
+         effective_time = now
+       <span class="info">tier=PRO (via fallback Q3: status=trialing passes... wait, no!</span>
+       <span class="bad">Q3 requires status=ACTIVE, but trialing != active</span>
+       <span class="bad">tier=FREE! User still sees FREE tier during trial start!</span>
+
+T=33s  <span class="webhook">invoice.payment_succeeded</span> webhook arrives (trial invoice, $0)
+       Creates: <span class="table">stripe_subscription_period</span>
+         charging_time = now (even for $0 trial invoice!)
+         period_start_time / period_end_time set
+       <span class="good">NOW: Q1 can match: period exists + charging_time NOT NULL</span>
+       <span class="good">tier=PRO, sub_state=ACTIVE</span>
+
+T=40s  Frontend polling has ended (10s window closed at T=40s)
+       <span class="bad">If webhook T=33 arrived after T=40, user sees FREE until manual refresh</span>
+
+<span class="h">TIMELINE: Trial Ends, Becomes Paid (month-to-year upgrade within trial)</span>
+
+T+7d   <span class="webhook">customer.subscription.updated</span> webhook arrives
+         previous_status = 'trialing', new_status = 'active'
+       Handler:
+         1. Expires old user_subscription (expiry_time = now)
+         2. Creates NEW user_subscription (status=active, new effective_time)
+       <span class="bad">Problem: Same gw_subscription_id now has TWO user_subscription rows</span>
+       <span class="bad">AND stripe_subscription_period records from BOTH trial and active periods</span>
+
+       has_ever_paid() must now distinguish:
+         - Trial period SSP (charging_time set, but was $0 trial)
+         - Active period SSP (charging_time set, actual payment)
+       <span class="bad">This is exactly what PR #1064 fixed: period_start_time >= effective_time</span>
+
+<span class="h">TIMELINE: Payment Fails on Renewal</span>
+
+T+30d  <span class="webhook">invoice.payment_failed</span> webhook arrives
+       Upserts: <span class="table">stripe_subscription_period</span>
+         charging_time = NULL, payment_failed_count++
+       <span class="info">get_user_subscription_state detects: period exists + charging_time IS NULL = PAYMENT_FAILED</span>
+
+T+30d  <span class="webhook">customer.subscription.updated</span> webhook arrives
+         new_status = 'past_due'
+       Updates: user_subscription.gw_subscription_status = 'past_due'
+
+       <span class="bad">Race: if subscription.updated arrives BEFORE invoice.payment_failed:</span>
+       <span class="bad">  Q1 still shows ACTIVE (old period still valid with charging_time)</span>
+       <span class="bad">  Only after invoice.payment_failed creates new period does state flip</span>
+</pre>
+</div>
+
+<!-- ============ SECTION 3: THE SIMPLIFIED APPROACH ============ -->
+<div class="section">3. Simplified Architecture: Write State at Webhook Time</div>
+
+<div class="row row-2">
+  <div class="card">
+    <div class="card-title">Current: Compute at Read Time <span class="badge badge-red">Complex</span></div>
+<pre>
+<span class="h">WRITE PATH (webhook handlers):</span>
+  <span class="webhook">subscription.created</span> --> <span class="table">user_subscription</span>
+  <span class="webhook">invoice.payment_succeeded</span> --> <span class="table">stripe_subscription_period</span>
+  <span class="webhook">subscription.updated</span> --> <span class="table">user_subscription</span> (new row)
+  <span class="webhook">subscription.deleted</span> --> <span class="table">user_subscription</span> (cancel_at)
+  <span class="dim">// State is scattered across tables</span>
+  <span class="dim">// No single source of truth</span>
+
+<span class="h">READ PATH (every API request):</span>
+  GET /user/profile -->
+    get_tier()                    ~150ms  <span class="bad">4 UNION ALL</span>
+    has_ever_paid()               ~100ms  <span class="bad">6 subqueries</span>
+    get_user_subscription_state() ~80ms   <span class="bad">3-branch CASE</span>
+    user_eligible_to_trial()      ~20ms
+    N x get_user_subscription_state() per team
+  <span class="bad">Total: ~350ms+ of SQL per request</span>
+  <span class="bad">Every fallback = a bug waiting to happen</span>
+</pre>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Proposed: Write State at Webhook Time <span class="badge badge-green">Simple</span></div>
+<pre>
+<span class="h">WRITE PATH (webhook handlers do MORE work):</span>
+  <span class="webhook">subscription.created</span> -->
+    <span class="table">user_subscription</span> (same as before)
+    <span class="good">+ UPDATE user_info SET tier = derive_tier(plan, status)</span>
+    <span class="good">+ UPDATE user_info SET subscription_state = status.user_status</span>
+
+  <span class="webhook">invoice.payment_succeeded</span> -->
+    <span class="table">stripe_subscription_period</span> (same as before)
+    <span class="good">+ if billing_reason != 'subscription_create' (not trial $0):</span>
+    <span class="good">    UPDATE user_info SET ever_paid = TRUE</span>
+
+  <span class="webhook">subscription.updated</span> -->
+    <span class="table">user_subscription</span> (same as before)
+    <span class="good">+ UPDATE user_info SET tier = derive_tier(plan, new_status)</span>
+    <span class="good">+ UPDATE user_info SET subscription_state = new_status.user_status</span>
+
+  <span class="webhook">subscription.deleted</span> -->
+    <span class="table">user_subscription</span> (same as before)
+    <span class="good">+ UPDATE user_info SET tier = FREE (if no other active sub)</span>
+    <span class="good">+ UPDATE user_info SET subscription_state = INACTIVE</span>
+
+<span class="h">READ PATH (every API request):</span>
+  GET /user/profile -->
+    <span class="good">SELECT tier, ever_paid, subscription_state FROM user_info</span>
+    <span class="good">Total: ~1ms, single row read</span>
+    <span class="good">No fallbacks, no edge cases, no JOINs</span>
+</pre>
+  </div>
+</div>
+
+<!-- ============ SECTION 4: CONCRETE IMPLEMENTATION SKETCH ============ -->
+<div class="section">4. Implementation Sketch: What Changes in Each File</div>
+
+<div class="row row-3">
+  <div class="card">
+    <div class="card-title">A. New Columns on user_info <span class="badge badge-purple">Migration</span></div>
+<pre>
+<span class="h">Alembic migration:</span>
+
+<span class="dim"># user_info table already has:</span>
+<span class="dim">#   tier VARCHAR(10)      -- exists but dead</span>
+<span class="dim">#   ever_paid_for_pro BOOL -- exists but dead</span>
+
+<span class="good">Repurpose existing columns:</span>
+
+<span class="field">tier</span> VARCHAR(10)
+  <span class="dim">-- already exists, just start writing to it</span>
+  <span class="dim">-- values: 'free', 'pro', 'plus', 'enterprise'</span>
+  <span class="dim">-- default: 'free'</span>
+
+<span class="field">ever_paid</span> BOOL DEFAULT FALSE
+  <span class="dim">-- rename ever_paid_for_pro -> ever_paid</span>
+  <span class="dim">-- or add new column, backfill, drop old</span>
+
+<span class="good">New column:</span>
+
+<span class="field">subscription_state</span> VARCHAR(25)
+  <span class="dim">-- values: never_subscribed, active,</span>
+  <span class="dim">--         inactive, payment_failed</span>
+  <span class="dim">-- default: 'never_subscribed'</span>
+
+<span class="h">Backfill script:</span>
+  Run existing get_tier() and has_ever_paid()
+  for all users ONCE to populate columns.
+  Then switch reads to column, remove old queries.
+</pre>
+  </div>
+
+  <div class="card">
+    <div class="card-title">B. Webhook Handler Changes <span class="badge badge-amber">event_handler.py</span></div>
+<pre>
+<span class="h">Add to each handler after existing logic:</span>
+
+<span class="webhook">handle_customer_subscription_created:</span>
+  <span class="dim"># After creating user_subscription...</span>
+  <span class="good">tier = USER_TIER_MAPPING.get(plan, UserTier.FREE)</span>
+  <span class="good">await update_user_materialized_state(</span>
+  <span class="good">    session, user_hash, tier=tier,</span>
+  <span class="good">    subscription_state=status.user_status</span>
+  <span class="good">)</span>
+
+<span class="webhook">handle_customer_subscription_updated:</span>
+  <span class="dim"># After creating new user_subscription...</span>
+  <span class="good">tier = USER_TIER_MAPPING.get(plan, UserTier.FREE)</span>
+  <span class="good">await update_user_materialized_state(</span>
+  <span class="good">    session, user_hash, tier=tier,</span>
+  <span class="good">    subscription_state=new_status.user_status</span>
+  <span class="good">)</span>
+
+<span class="webhook">handle_customer_subscription_canceled:</span>
+  <span class="dim"># After updating user_subscription...</span>
+  <span class="good">has_other_active = await check_other_active_sub(</span>
+  <span class="good">    session, user_hash, exclude_sub_id)</span>
+  <span class="good">if not has_other_active:</span>
+  <span class="good">    await update_user_materialized_state(</span>
+  <span class="good">        session, user_hash,</span>
+  <span class="good">        tier=UserTier.FREE,</span>
+  <span class="good">        subscription_state=INACTIVE</span>
+  <span class="good">    )</span>
+
+<span class="webhook">handle_invoice_payment_succeeded:</span>
+  <span class="dim"># After upserting subscription_period...</span>
+  <span class="good">if billing_reason != 'subscription_create':</span>
+  <span class="good">    user_hash = find_user_hash(sub_id)</span>
+  <span class="good">    await update_user_materialized_state(</span>
+  <span class="good">        session, user_hash, ever_paid=True</span>
+  <span class="good">    )</span>
+
+<span class="webhook">handle_invoice_payment_failed:</span>
+  <span class="good">user_hash = find_user_hash(sub_id)</span>
+  <span class="good">await update_user_materialized_state(</span>
+  <span class="good">    session, user_hash,</span>
+  <span class="good">    subscription_state=PAYMENT_FAILED</span>
+  <span class="good">)</span>
+</pre>
+  </div>
+
+  <div class="card">
+    <div class="card-title">C. Read Path Simplification <span class="badge badge-green">repositories.py</span></div>
+<pre>
+<span class="h">New helper (replaces 3 complex methods):</span>
+
+<span class="good">async def update_user_materialized_state(</span>
+<span class="good">    session, user_hash,</span>
+<span class="good">    tier=None, ever_paid=None,</span>
+<span class="good">    subscription_state=None</span>
+<span class="good">):</span>
+<span class="good">    updates = {}</span>
+<span class="good">    if tier is not None:</span>
+<span class="good">        updates['tier'] = tier.value</span>
+<span class="good">    if ever_paid is not None:</span>
+<span class="good">        updates['ever_paid'] = ever_paid</span>
+<span class="good">    if subscription_state is not None:</span>
+<span class="good">        updates['subscription_state'] = state</span>
+<span class="good">    if updates:</span>
+<span class="good">        await session.execute(</span>
+<span class="good">            update(UserInfo)</span>
+<span class="good">            .where(UserInfo.user_hash == user_hash)</span>
+<span class="good">            .values(**updates)</span>
+<span class="good">        )</span>
+
+<span class="h">Simplified read (replaces get_tier):</span>
+
+<span class="good">async def get_tier(self, user_hash):</span>
+<span class="good">    stmt = select(UserInfo.tier).where(</span>
+<span class="good">        UserInfo.user_hash == user_hash</span>
+<span class="good">    )</span>
+<span class="good">    tier = (await self.session.execute(</span>
+<span class="good">        stmt)).scalar_one_or_none()</span>
+<span class="good">    return UserTier(tier) if tier else UserTier.FREE</span>
+
+<span class="dim">// Same pattern for has_ever_paid, subscription_state</span>
+
+<span class="h">DELETE these methods (490+ lines removed):</span>
+  <span class="strike">get_tier() -- 150 lines</span>
+  <span class="strike">has_ever_paid() -- 130 lines</span>
+  <span class="strike">get_user_subscription_state() -- 130 lines</span>
+  <span class="strike">get_user_subscription_state_by_plan() -- 80 lines</span>
+</pre>
+  </div>
+</div>
+
+<!-- ============ SECTION 5: TEAM MEMBER EDGE CASE ============ -->
+<div class="section">5. Team Plan Edge Case: Member Tier Updates</div>
+
+<div class="card" style="margin-bottom:20px">
+<pre>
+<span class="h">TEAM PLAN: tier is inherited by ALL team members, not just admin</span>
+
+Current get_tier() handles this via Q2/Q4:
+  JOIN team_member + team + user_subscription + stripe_subscription_period
+  If user is ACTIVE team member of a team with active subscription --> PRO
+
+<span class="h">With materialized state, team member tier updates need to happen at:</span>
+
+  1. <span class="webhook">subscription.created</span> (team plan)
+     Admin only - create team + add admin as member
+     <span class="good">UPDATE user_info SET tier=PRO WHERE user_hash = admin_hash</span>
+
+  2. <span class="info">Team member joins</span> (via invitation acceptance)
+     New member joins active team
+     <span class="good">UPDATE user_info SET tier=PRO WHERE user_id = new_member_user_id</span>
+     <span class="dim">// Add this to team member join handler</span>
+
+  3. <span class="webhook">subscription.deleted</span> (team plan)
+     Team deactivated, all members lose tier
+     <span class="good">UPDATE user_info SET tier=FREE</span>
+     <span class="good">WHERE user_id IN (SELECT user_id FROM team_member WHERE team_id = X)</span>
+     <span class="dim">// Unless member has their own personal PRO sub!</span>
+     <span class="good">...AND user_hash NOT IN (SELECT user_hash FROM user_subscription</span>
+     <span class="good">    WHERE plan='pro' AND cancel_at IS NULL AND gw_subscription_status='active')</span>
+
+  4. <span class="info">Team member removed</span> (admin removes member)
+     <span class="good">Same as #3 but for single user</span>
+
+  5. <span class="webhook">invoice.payment_failed</span> (team plan)
+     <span class="good">UPDATE user_info SET subscription_state=PAYMENT_FAILED</span>
+     <span class="good">WHERE user_id IN (SELECT user_id FROM team_member WHERE team_id = X AND role = 'admin')</span>
+     <span class="dim">// Only admin sees payment_failed, members filtered in router</span>
+
+<span class="bad">This is the ONLY added complexity in the write path.</span>
+<span class="good">But it replaces the PERMANENT 5-table JOIN in every read.</span>
+<span class="good">Team operations are infrequent; reads happen on EVERY request.</span>
+</pre>
+</div>
+
+<!-- ============ SECTION 6: MIGRATION STRATEGY ============ -->
+<div class="section">6. Safe Migration Strategy (Zero Downtime)</div>
+
+<div class="card" style="margin-bottom:20px">
+<pre>
+<span class="h">PHASE 1: Dual Write (webhook writes + old reads)</span>
+  - Add migration: ensure tier, ever_paid columns are usable
+  - Add subscription_state column to user_info
+  - Webhook handlers: start writing tier/ever_paid/subscription_state
+  - Read path: STILL uses old get_tier()/has_ever_paid() queries
+  - <span class="good">Zero risk: writes are additive, reads unchanged</span>
+
+<span class="h">PHASE 2: Backfill</span>
+  - Run script: for each user, compute get_tier() + has_ever_paid()
+  - Write results to user_info columns
+  - <span class="good">Now ALL users have materialized state</span>
+
+<span class="h">PHASE 3: Shadow Read (validate)</span>
+  - Read path: read BOTH old queries AND new columns
+  - Log any mismatches to monitoring (NewRelic/debuguy)
+  - Run for 1-2 weeks to verify consistency
+  - <span class="good">Catches any webhook handler gaps</span>
+
+<span class="h">PHASE 4: Switch Reads</span>
+  - Read path: switch to reading columns directly
+  - Keep old query methods available but unused
+  - <span class="good">Instant 350ms+ savings per profile request</span>
+
+<span class="h">PHASE 5: Cleanup</span>
+  - Delete get_tier() (150 lines)
+  - Delete has_ever_paid() (130 lines)
+  - Delete get_user_subscription_state() (130 lines)
+  - Delete get_user_subscription_state_by_plan() (80 lines)
+  - Delete fallback queries, trial_extension logic
+  - Remove index migration for get_tier query optimization
+  - <span class="good">~490 lines of complex SQL deleted</span>
+  - <span class="good">No more fallback bugs like PR #1064</span>
+</pre>
+</div>
+
+<!-- ============ SECTION 7: BEFORE/AFTER COMPARISON ============ -->
+<div class="section">7. Before / After Comparison</div>
+
+<div class="row row-2">
+  <div class="card">
+    <div class="card-title">BEFORE <span class="badge badge-red">Current</span></div>
+<pre>
+<span class="bad">Read Path (/user/profile):</span>
+  4 UNION ALL + 6 subqueries + 3-branch CASE
+  5 tables JOINed (user_info, user_subscription,
+    stripe_subscription_period, team, team_member)
+  ~350ms per request
+  ~490 lines of SQL logic
+  Fallback queries for webhook gaps
+  Trial extension exclusion logic
+  period_start_time >= effective_time guards
+
+<span class="bad">Write Path (webhooks):</span>
+  Write to user_subscription
+  Write to stripe_subscription_period
+  That's it - no state materialization
+
+<span class="bad">Bugs:</span>
+  PR #1064: has_ever_paid wrong for trial users
+  Fallback queries weaker than primary queries
+  Out-of-order webhooks cause temporary wrong state
+  10s polling window too short for webhook delays
+</pre>
+  </div>
+
+  <div class="card">
+    <div class="card-title">AFTER <span class="badge badge-green">Proposed</span></div>
+<pre>
+<span class="good">Read Path (/user/profile):</span>
+  SELECT tier, ever_paid, subscription_state
+  FROM user_info WHERE user_hash = ?
+  ~1ms per request (indexed PK lookup)
+  ~10 lines of code
+  No fallbacks needed
+  No trial edge cases in reads
+  No multi-table JOINs
+
+<span class="good">Write Path (webhooks):</span>
+  Write to user_subscription (same)
+  Write to stripe_subscription_period (same)
+  + UPDATE user_info SET tier/ever_paid/state
+  ~15 lines of new code per handler
+  Team: batch update members on sub changes
+
+<span class="good">Benefits:</span>
+  350ms -> 1ms per profile read (350x faster)
+  490 lines of SQL deleted
+  No more fallback bugs
+  Webhook delay = write delay (not read delay)
+  Self-documenting: state is WHERE you look for it
+
+<span class="good">Trade-off:</span>
+  Team member join/leave must update tier
+  Need backfill migration for existing users
+  Need reconciliation job for safety net
+</pre>
+  </div>
+</div>
+
+<!-- ============ SECTION 8: RECONCILIATION ============ -->
+<div class="section">8. Safety Net: Nightly Reconciliation Job</div>
+
+<div class="card">
+<pre>
+<span class="h">Even with materialized state, add a reconciliation cron as safety net:</span>
+
+<span class="good">async def reconcile_user_tiers():</span>
+<span class="good">    """Run nightly. Fixes any drift between Stripe truth and our DB."""</span>
+<span class="good">    </span>
+<span class="good">    # 1. Get all users with active subscriptions in Stripe</span>
+<span class="good">    stripe_active = stripe.Subscription.list(status='active', limit=100)</span>
+<span class="good">    </span>
+<span class="good">    # 2. For each, verify our DB matches</span>
+<span class="good">    for sub in stripe_active:</span>
+<span class="good">        user_hash = sub.metadata.get('user_hash')</span>
+<span class="good">        expected_tier = USER_TIER_MAPPING[plan]</span>
+<span class="good">        actual_tier = db.query(user_info.tier).filter(user_hash=user_hash)</span>
+<span class="good">        if actual_tier != expected_tier:</span>
+<span class="good">            log_alert(f"DRIFT: {user_hash} has {actual_tier}, should be {expected_tier}")</span>
+<span class="good">            db.update(user_info, tier=expected_tier)</span>
+<span class="good">    </span>
+<span class="good">    # 3. Check for users marked PRO but no active Stripe sub</span>
+<span class="good">    pro_users = db.query(user_info).filter(tier='pro')</span>
+<span class="good">    for user in pro_users:</span>
+<span class="good">        if not has_active_stripe_sub(user):</span>
+<span class="good">            log_alert(f"STALE PRO: {user.user_hash}")</span>
+<span class="good">            db.update(user_info, tier='free')</span>
+
+<span class="dim">This catches: missed webhooks, failed event processing, manual Stripe changes,</span>
+<span class="dim">any bugs in the write path. Runs once/day, low cost, high confidence.</span>
+</pre>
+</div>
+
+</div>
+</body>
+</html>

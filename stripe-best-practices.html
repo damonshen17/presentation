@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Stripe Best Practices vs Current Architecture</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace; background: #0a0a0f; color: #e0e0e0; padding: 24px; }
+  h1 { text-align: center; font-size: 20px; color: #7dd3fc; margin-bottom: 6px; }
+  .subtitle { text-align: center; color: #64748b; font-size: 12px; margin-bottom: 24px; }
+  .grid { max-width: 1440px; margin: 0 auto; }
+  .section { font-size: 15px; font-weight: 700; color: #e2e8f0; margin: 28px 0 14px; padding-bottom: 6px; border-bottom: 1px solid #1e293b; }
+  .row { display: grid; gap: 20px; margin-bottom: 20px; }
+  .row-2 { grid-template-columns: 1fr 1fr; }
+  .row-3 { grid-template-columns: 1fr 1fr 1fr; }
+  .card { background: #111118; border: 1px solid #1e293b; border-radius: 10px; padding: 16px; }
+  .card-title { font-size: 13px; font-weight: 700; color: #f1f5f9; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+  .badge { font-size: 10px; padding: 2px 7px; border-radius: 4px; font-weight: 600; }
+  .badge-red { background: #450a0a; color: #fca5a5; }
+  .badge-green { background: #14532d; color: #86efac; }
+  .badge-amber { background: #451a03; color: #fbbf24; }
+  .badge-blue { background: #1e3a5f; color: #7dd3fc; }
+  .badge-purple { background: #3b0764; color: #c4b5fd; }
+  .badge-stripe { background: #635bff30; color: #a29bfe; }
+  pre { font-size: 11px; line-height: 1.7; color: #94a3b8; overflow-x: auto; }
+  pre .h { color: #f1f5f9; font-weight: 700; }
+  pre .stripe { color: #a29bfe; }
+  pre .good { color: #86efac; }
+  pre .bad { color: #f87171; }
+  pre .info { color: #38bdf8; }
+  pre .warn { color: #fbbf24; }
+  pre .dim { color: #475569; }
+  pre .field { color: #fb923c; }
+  pre .quote { color: #7dd3fc; font-style: italic; border-left: 2px solid #334155; padding-left: 8px; display: block; margin: 4px 0; }
+  .callout { background: #1a1a2e; border-left: 3px solid #635bff; padding: 12px 14px; border-radius: 0 6px 6px 0; margin: 10px 0; }
+  .callout p { font-size: 11px; color: #94a3b8; line-height: 1.6; }
+  .callout .hl { color: #a29bfe; font-weight: 600; }
+  .callout-green { border-left-color: #86efac; background: #0a1a0a; }
+  .callout-red { border-left-color: #f87171; background: #1a0a0a; }
+  .vs { display: flex; align-items: center; justify-content: center; font-size: 18px; color: #475569; font-weight: 700; padding: 10px 0; }
+  @media (max-width: 900px) { .row-2, .row-3 { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+
+<h1>Stripe Official Best Practices vs Our Architecture</h1>
+<p class="subtitle">What Stripe recommends, what we do, and the right path forward</p>
+
+<div class="grid">
+
+<!-- ============ SECTION 1: STRIPE'S 3 KEY RECOMMENDATIONS ============ -->
+<div class="section">1. Stripe's Official Recommendations (from docs)</div>
+
+<div class="row row-3">
+  <div class="card">
+    <div class="card-title">Dual-Trigger Fulfillment <span class="badge badge-stripe">Stripe Docs</span></div>
+<pre>
+<span class="stripe">From: docs.stripe.com/checkout/fulfillment</span>
+
+<span class="quote">"You must use webhooks to make sure
+fulfillment happens for every payment."</span>
+
+<span class="quote">"Webhooks can sometimes be delayed.
+To optimize your payment flow and guarantee
+immediate fulfillment when your customer
+is present, trigger fulfillment from your
+landing page as well."</span>
+
+<span class="h">Pattern: fulfill_checkout(session_id)</span>
+
+  <span class="good">Trigger 1: Webhook</span>
+    checkout.session.completed arrives
+    --> call fulfill_checkout(session_id)
+
+  <span class="good">Trigger 2: Landing Page</span>
+    User lands on success page
+    --> extract session_id from URL
+    --> call fulfill_checkout(session_id)
+    <span class="warn">(same function, idempotent)</span>
+
+  <span class="h">Inside fulfill_checkout():</span>
+    1. Retrieve session from Stripe API
+    2. Check payment_status
+    3. Provision access (if not already done)
+    4. Mark as fulfilled (idempotent guard)
+</pre>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Store State in Your DB <span class="badge badge-stripe">Stripe Docs</span></div>
+<pre>
+<span class="stripe">From: docs.stripe.com/billing/subscriptions</span>
+
+<span class="quote">"Store the status in your database and
+check when a user accesses your service.
+This approach helps you avoid hitting
+rate limits."</span>
+
+<span class="quote">"Store customers' credentials and a mapped
+timestamp value that represents the access
+expiration date for that customer."</span>
+
+<span class="quote">"When the customer logs in, you check
+whether the timestamp is still in the
+future."</span>
+
+<span class="h">Recommended fields to store:</span>
+  - subscription.id
+  - subscription.status
+  - product.id
+  - customer.id
+  - <span class="warn">access expiration date</span>
+
+<span class="h">Key principle:</span>
+<span class="quote">"The subscription status might change
+at any point during its lifetime, even
+if your application doesn't directly
+make any calls to Stripe."</span>
+
+<span class="info">--> Don't query Stripe on every access check</span>
+<span class="info">--> Store state locally, update via webhooks</span>
+</pre>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Webhook-Driven Provisioning <span class="badge badge-stripe">Stripe Docs</span></div>
+<pre>
+<span class="stripe">From: docs.stripe.com/billing/subscriptions/webhooks</span>
+
+<span class="quote">"Provision access to your product when
+you receive invoice.paid and the
+subscription status is active."</span>
+
+<span class="quote">"When the subscription changes to
+canceled or unpaid, revoke access."</span>
+
+<span class="h">Recommended event --> action mapping:</span>
+
+  <span class="warn">invoice.paid</span>
+    --> Provision access
+    --> Store access expiration date
+    <span class="dim">"plus a day or two for leeway"</span>
+
+  <span class="warn">invoice.payment_failed</span>
+    --> Notify customer
+    --> Flag account
+
+  <span class="warn">customer.subscription.updated</span>
+    --> Refresh plan/discount metadata
+
+  <span class="warn">customer.subscription.deleted</span>
+    --> Revoke access
+
+  <span class="warn">customer.subscription.trial_will_end</span>
+    --> Verify payment method exists
+
+<span class="h">NOT recommended:</span>
+  <span class="bad">Querying Stripe API on every page load</span>
+  <span class="bad">Computing state from raw event data at read time</span>
+</pre>
+  </div>
+</div>
+
+<!-- ============ SECTION 2: YOUR QUESTION - 3 APPROACHES ============ -->
+<div class="section">2. Three Approaches Compared</div>
+
+<div class="row row-3">
+  <div class="card">
+    <div class="card-title">A. Webhook-Only (Current) <span class="badge badge-red">Ours</span></div>
+<pre>
+<span class="h">Flow:</span>
+  User pays on Stripe
+  --> Stripe sends webhooks
+  --> Webhooks write to user_subscription +
+      stripe_subscription_period
+  --> Frontend polls GET /user/profile
+  --> <span class="bad">get_tier() computes across 5 tables</span>
+  --> Returns tier to frontend
+
+<span class="h">Problems:</span>
+  <span class="bad">1. No fulfillment on landing page</span>
+     Stripe explicitly says you need this
+  <span class="bad">2. State computed at read time</span>
+     Stripe says "store the status in your DB"
+  <span class="bad">3. No Stripe API verification</span>
+     Never confirms with Stripe directly
+  <span class="bad">4. Fallback queries for webhook gaps</span>
+     Permanent complexity for transient problem
+  <span class="bad">5. No retry for failed events</span>
+     Failed webhooks = permanent desync
+
+<span class="h">Verdict:</span>
+  <span class="bad">Violates Stripe's dual-trigger pattern</span>
+  <span class="bad">Violates "store status in your DB"</span>
+  <span class="bad">Over-engineers the read path</span>
+  <span class="bad">Under-engineers the write path</span>
+</pre>
+  </div>
+
+  <div class="card">
+    <div class="card-title">B. API-Call-First + Webhook Correction <span class="badge badge-amber">Your Idea</span></div>
+<pre>
+<span class="h">Flow:</span>
+  User pays on Stripe
+  --> Stripe redirects to success page
+  --> <span class="info">Success page calls Stripe API</span>
+      <span class="info">to retrieve session + subscription</span>
+  --> <span class="info">Immediately provisions access</span>
+  --> Webhooks arrive later
+  --> <span class="info">Webhooks CORRECT/CONFIRM state</span>
+
+<span class="h">Pros:</span>
+  <span class="good">Instant provisioning (no webhook wait)</span>
+  <span class="good">Matches Stripe's dual-trigger pattern!</span>
+  <span class="good">Webhook becomes safety net, not sole path</span>
+
+<span class="h">Cons:</span>
+  <span class="warn">Only works when user visits success page</span>
+  <span class="warn">Doesn't handle renewals, cancellations</span>
+  <span class="warn">(those happen without user being present)</span>
+  <span class="warn">Still need webhooks for ongoing lifecycle</span>
+
+<span class="h">Verdict:</span>
+  <span class="good">Good for initial checkout fulfillment</span>
+  <span class="warn">Incomplete for full subscription lifecycle</span>
+  <span class="warn">Need to combine with materialized state</span>
+</pre>
+  </div>
+
+  <div class="card">
+    <div class="card-title">C. Stripe's Full Pattern <span class="badge badge-green">Best Practice</span></div>
+<pre>
+<span class="h">Flow:</span>
+  <span class="good">CHECKOUT:</span>
+    User pays on Stripe
+    --> Success page: retrieve session from
+        Stripe API, provision immediately
+    --> Webhook: same fulfill function
+        (idempotent, runs only once)
+
+  <span class="good">ONGOING LIFECYCLE:</span>
+    Webhooks update materialized state:
+    --> invoice.paid: set tier=PRO,
+        access_expiry = period_end + 2 days
+    --> invoice.payment_failed: set
+        subscription_state = PAYMENT_FAILED
+    --> subscription.deleted: set tier=FREE
+
+  <span class="good">ACCESS CHECK:</span>
+    Read stored tier/expiry from user record
+    No computation, no JOINs, no fallbacks
+
+  <span class="good">SAFETY NET:</span>
+    Nightly reconciliation with Stripe API
+    Catches any drift from missed webhooks
+
+<span class="h">Verdict:</span>
+  <span class="good">Matches ALL Stripe recommendations</span>
+  <span class="good">Instant checkout + reliable lifecycle</span>
+  <span class="good">Simple reads, smart writes</span>
+  <span class="good">Self-healing via reconciliation</span>
+</pre>
+  </div>
+</div>
+
+<!-- ============ SECTION 3: THE RIGHT ANSWER ============ -->
+<div class="section">3. The Right Answer: Combine Your Idea + Materialized State</div>
+
+<div class="card" style="margin-bottom:20px">
+  <div class="callout">
+    <p>Your intuition is <span class="hl">exactly right</span> and aligns with Stripe's official recommendation. The best practice is a <span class="hl">dual-trigger + materialized state</span> pattern. Neither webhook-only nor API-call-only is sufficient alone.</p>
+  </div>
+<pre>
+<span class="h">THE COMPLETE PATTERN (Stripe-recommended + your idea combined):</span>
+
+<span class="good">=====================================================</span>
+<span class="good"> LAYER 1: Checkout Fulfillment (Dual-Trigger)        </span>
+<span class="good">=====================================================</span>
+
+  <span class="h">Trigger A: Success Page (instant, user is present)</span>
+
+    User lands on /checkout-success?session_id=cs_xxx
+                          |
+                          v
+    Backend: fulfill_checkout(session_id)
+      1. stripe.checkout.Session.retrieve(session_id, expand=['subscription'])
+      2. if session.payment_status == 'paid':
+      3.    subscription = session.subscription
+      4.    <span class="good">UPDATE user_info SET</span>
+      5.      <span class="good">tier = derive_tier(subscription.plan),</span>
+      6.      <span class="good">subscription_state = subscription.status,</span>
+      7.      <span class="good">fulfilled_session_id = session_id  -- idempotency guard</span>
+      8.    Create user_subscription record
+      9.    Return tier=PRO to frontend
+      <span class="info">User sees PRO immediately. No polling needed!</span>
+
+  <span class="h">Trigger B: Webhook (reliable, covers all cases)</span>
+
+    checkout.session.completed arrives
+                          |
+                          v
+    Backend: fulfill_checkout(session_id)  <span class="dim">-- SAME function</span>
+      1. Check: if already fulfilled (fulfilled_session_id exists) --> skip
+      2. Otherwise: same logic as Trigger A
+      <span class="info">Idempotent. If success page already handled it, this is a no-op.</span>
+      <span class="info">If user closed browser before success page, this catches it.</span>
+
+<span class="good">=====================================================</span>
+<span class="good"> LAYER 2: Ongoing Lifecycle (Webhook + Materialize)   </span>
+<span class="good">=====================================================</span>
+
+  <span class="warn">invoice.paid</span> webhook:
+    <span class="good">UPDATE user_info SET</span>
+    <span class="good">  ever_paid = TRUE (if not trial $0 invoice),</span>
+    <span class="good">  access_expiry = period_end_time + 2 days</span>
+    + Upsert stripe_subscription_period (keep for audit)
+
+  <span class="warn">invoice.payment_failed</span> webhook:
+    <span class="good">UPDATE user_info SET subscription_state = 'payment_failed'</span>
+    + Upsert stripe_subscription_period (keep for audit)
+
+  <span class="warn">customer.subscription.updated</span> webhook:
+    <span class="good">UPDATE user_info SET</span>
+    <span class="good">  tier = derive_tier(new_plan),</span>
+    <span class="good">  subscription_state = new_status</span>
+    + Update user_subscription record (keep for history)
+
+  <span class="warn">customer.subscription.deleted</span> webhook:
+    <span class="good">UPDATE user_info SET</span>
+    <span class="good">  tier = FREE (if no other active sub),</span>
+    <span class="good">  subscription_state = 'inactive'</span>
+    + Update user_subscription record
+
+<span class="good">=====================================================</span>
+<span class="good"> LAYER 3: Access Check (Simple Read)                  </span>
+<span class="good">=====================================================</span>
+
+  GET /user/profile:
+    <span class="good">SELECT tier, ever_paid, subscription_state, access_expiry</span>
+    <span class="good">FROM user_info WHERE user_hash = ?</span>
+    <span class="good">-- 1ms, indexed, no JOINs, no fallbacks</span>
+
+  Optional bonus: if access_expiry < now AND tier != FREE:
+    <span class="dim">-- Grace period expired, subscription may have lapsed</span>
+    <span class="dim">-- Could trigger async Stripe API check</span>
+
+<span class="good">=====================================================</span>
+<span class="good"> LAYER 4: Safety Net (Reconciliation)                 </span>
+<span class="good">=====================================================</span>
+
+  Nightly cron:
+    For users with tier=PRO:
+      Verify active Stripe subscription exists
+      If not: downgrade to FREE, alert ops
+    For users with tier=FREE:
+      Check if Stripe has active subscription we missed
+      If yes: upgrade to PRO, alert ops
+    <span class="dim">-- Catches missed webhooks, manual Stripe changes, bugs</span>
+</pre>
+</div>
+
+<!-- ============ SECTION 4: WHAT CHANGES FROM CURRENT ============ -->
+<div class="section">4. Concrete Changes From Current Architecture</div>
+
+<div class="row row-2">
+  <div class="card">
+    <div class="card-title">What We Keep <span class="badge badge-green">No Change</span></div>
+<pre>
+<span class="good">Keep:</span>
+  <span class="field">stripe_event</span> table (audit log)
+  <span class="field">user_subscription</span> table (subscription history)
+  <span class="field">stripe_subscription_period</span> table (billing audit)
+  <span class="field">stripe_checkout_session</span> table (checkout tracking)
+  <span class="field">stripe_subscription_price</span> table (price catalog)
+
+  Webhook endpoint + signature verification
+  Event type routing in handle_event()
+  Team plan creation logic
+  Stripe customer metadata updates
+  All existing write-path logic in event handlers
+
+<span class="dim">These tables remain as the detailed audit trail.</span>
+<span class="dim">The webhook handlers still do their current work.</span>
+<span class="dim">We just ADD state materialization on top.</span>
+</pre>
+  </div>
+
+  <div class="card">
+    <div class="card-title">What Changes <span class="badge badge-amber">Diff</span></div>
+<pre>
+<span class="good">Add:</span>
+  1. <span class="field">fulfill_checkout()</span> function
+     Called from BOTH success page + webhook
+     Retrieves session from Stripe API
+     Provisions access immediately
+     Idempotent (check fulfilled_session_id)
+
+  2. <span class="field">Materialized columns</span> on user_info
+     Repurpose existing tier column (start writing)
+     Add subscription_state, access_expiry
+     Rename/repurpose ever_paid_for_pro
+
+  3. <span class="field">State writes in webhook handlers</span>
+     ~5 lines per handler to UPDATE user_info
+     After existing logic (additive, not replacing)
+
+  4. <span class="field">Reconciliation cron</span>
+     Nightly Stripe API check vs DB state
+
+<span class="bad">Remove:</span>
+  5. <span class="field">get_tier()</span> -- 150 lines of UNION ALL
+  6. <span class="field">has_ever_paid()</span> -- 130 lines of subqueries
+  7. <span class="field">get_user_subscription_state()</span> -- 130 lines
+  8. <span class="field">get_user_subscription_state_by_plan()</span> -- 80 lines
+  9. <span class="field">Fallback queries</span> -- all of them
+  10. <span class="field">Frontend polling</span> -- useSubscriptionStatePolling
+      (success page gets tier from fulfill_checkout)
+</pre>
+  </div>
+</div>
+
+<!-- ============ SECTION 5: ANSWER TO YOUR QUESTION ============ -->
+<div class="section">5. Direct Answer to Your Question</div>
+
+<div class="card">
+<pre>
+<span class="h">Q: Should we sync state after our API call + use webhook to correct later?</span>
+
+<span class="good">A: YES. This is exactly what Stripe recommends.</span>
+
+Stripe calls this the <span class="stripe">"dual-trigger fulfillment"</span> pattern:
+
+  <span class="quote">"Webhooks can sometimes be delayed. To optimize your payment flow
+  and guarantee immediate fulfillment when your customer is present,
+  trigger fulfillment from your landing page as well."</span>
+
+<span class="h">Q: Is our current approach (webhook-only + compute at read time) best practice?</span>
+
+<span class="bad">A: NO. It violates multiple Stripe recommendations:</span>
+
+  1. <span class="bad">No landing page fulfillment</span>
+     Stripe: "trigger fulfillment from your landing page as well"
+     Ours: webhook-only, frontend polls hoping webhook arrived
+
+  2. <span class="bad">State computed at read time instead of stored</span>
+     Stripe: "Store the status in your database and check when a user accesses your service"
+     Ours: 4-query UNION ALL + 6 subqueries computed on every request
+
+  3. <span class="bad">No access expiration date</span>
+     Stripe: "store a mapped timestamp value that represents the access expiration date"
+     Ours: compute from period_start_time/period_end_time/charging_time JOINs
+
+  4. <span class="bad">No reconciliation</span>
+     Stripe: implied by "subscription status might change at any point"
+     Ours: no safety net for missed webhooks
+
+<span class="h">Q: What's the community consensus?</span>
+
+The overwhelming pattern across Stripe integrations:
+  1. <span class="good">Fulfill on success page</span> (Stripe API call, instant for user)
+  2. <span class="good">Webhooks update materialized state</span> (reliable backend)
+  3. <span class="good">Simple access checks</span> (read a column, not compute a query)
+  4. <span class="good">Reconciliation as safety net</span> (nightly or hourly)
+
+Our current architecture inverted this:
+  - Write path is minimal (just save webhook data)
+  - Read path does all the work (compute state from raw data)
+  - <span class="bad">This is backwards. Writes are rare, reads are constant.</span>
+  - <span class="bad">Do the work ONCE at write time, not N times at read time.</span>
+</pre>
+</div>
+
+</div>
+</body>
+</html>

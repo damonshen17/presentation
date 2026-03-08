@@ -1,0 +1,580 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DLAI Checkout Flow & Stripe Data Sync Architecture</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace; background: #0a0a0f; color: #e0e0e0; padding: 24px; min-height: 100vh; }
+  h1 { text-align: center; font-size: 22px; color: #7dd3fc; margin-bottom: 8px; letter-spacing: 1px; }
+  .subtitle { text-align: center; color: #64748b; font-size: 13px; margin-bottom: 28px; }
+
+  /* Layout */
+  .grid { display: grid; grid-template-columns: 1fr; gap: 24px; max-width: 1400px; margin: 0 auto; }
+  .row { display: grid; gap: 24px; }
+  .row-2 { grid-template-columns: 1fr 1fr; }
+  .row-3 { grid-template-columns: 1fr 1fr 1fr; }
+
+  /* Cards */
+  .card { background: #111118; border: 1px solid #1e293b; border-radius: 12px; padding: 20px; position: relative; }
+  .card-title { font-size: 14px; font-weight: 700; color: #f1f5f9; margin-bottom: 14px; display: flex; align-items: center; gap: 8px; }
+  .card-title .badge { font-size: 10px; padding: 2px 8px; border-radius: 4px; font-weight: 600; }
+  .badge-blue { background: #1e3a5f; color: #7dd3fc; }
+  .badge-green { background: #14532d; color: #86efac; }
+  .badge-amber { background: #451a03; color: #fbbf24; }
+  .badge-red { background: #450a0a; color: #fca5a5; }
+  .badge-purple { background: #3b0764; color: #c4b5fd; }
+
+  /* Flow diagram */
+  .flow { display: flex; flex-direction: column; gap: 4px; }
+  .flow-step { display: flex; align-items: flex-start; gap: 10px; padding: 6px 0; }
+  .flow-num { min-width: 22px; height: 22px; border-radius: 50%; background: #1e3a5f; color: #7dd3fc; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; flex-shrink: 0; margin-top: 1px; }
+  .flow-text { font-size: 12px; line-height: 1.5; color: #cbd5e1; }
+  .flow-text code { background: #1e293b; padding: 1px 5px; border-radius: 3px; color: #f9a8d4; font-size: 11px; }
+  .flow-text .endpoint { color: #86efac; }
+  .flow-text .webhook { color: #fbbf24; }
+  .flow-text .table { color: #c4b5fd; }
+  .flow-text .field { color: #fb923c; }
+  .flow-text .warn { color: #f87171; font-weight: 600; }
+  .flow-text .info { color: #38bdf8; }
+
+  .arrow-down { text-align: center; color: #334155; font-size: 16px; line-height: 1; }
+
+  /* Data model */
+  .model { background: #0f172a; border: 1px solid #1e293b; border-radius: 8px; padding: 12px; margin-bottom: 10px; }
+  .model-name { font-size: 13px; font-weight: 700; color: #c4b5fd; margin-bottom: 8px; }
+  .model-fields { list-style: none; }
+  .model-fields li { font-size: 11px; padding: 3px 0; color: #94a3b8; display: flex; gap: 6px; }
+  .model-fields .fname { color: #fb923c; min-width: 160px; }
+  .model-fields .ftype { color: #64748b; }
+  .model-fields .fcomment { color: #475569; font-style: italic; }
+  .model-fields .deprecated { text-decoration: line-through; color: #dc2626; }
+
+  /* Webhook event list */
+  .event-list { list-style: none; }
+  .event-list li { font-size: 11px; padding: 5px 0; border-bottom: 1px solid #1a1a2e; display: flex; gap: 8px; align-items: flex-start; }
+  .event-list li:last-child { border-bottom: none; }
+  .event-name { color: #fbbf24; min-width: 210px; flex-shrink: 0; }
+  .event-action { color: #94a3b8; }
+
+  /* Issue cards */
+  .issue { background: #1a0a0a; border: 1px solid #7f1d1d; border-radius: 8px; padding: 12px; margin-bottom: 10px; }
+  .issue-title { font-size: 12px; font-weight: 700; color: #fca5a5; margin-bottom: 6px; }
+  .issue-desc { font-size: 11px; color: #94a3b8; line-height: 1.5; }
+
+  .improvement { background: #0a1a0a; border: 1px solid #14532d; border-radius: 8px; padding: 12px; margin-bottom: 10px; }
+  .improvement-title { font-size: 12px; font-weight: 700; color: #86efac; margin-bottom: 6px; }
+  .improvement-desc { font-size: 11px; color: #94a3b8; line-height: 1.5; }
+
+  /* Section headers */
+  .section-header { font-size: 16px; font-weight: 700; color: #e2e8f0; margin: 28px 0 16px; padding-bottom: 8px; border-bottom: 1px solid #1e293b; }
+
+  /* Sync diagram */
+  .sync-box { display: flex; align-items: center; justify-content: center; gap: 16px; padding: 16px; flex-wrap: wrap; }
+  .sync-node { background: #1e293b; border-radius: 8px; padding: 10px 16px; text-align: center; min-width: 120px; }
+  .sync-node.stripe { border: 2px solid #635bff; }
+  .sync-node.api { border: 2px solid #38bdf8; }
+  .sync-node.db { border: 2px solid #c4b5fd; }
+  .sync-node.fe { border: 2px solid #86efac; }
+  .sync-node .label { font-size: 12px; font-weight: 700; color: #f1f5f9; }
+  .sync-node .sub { font-size: 10px; color: #64748b; margin-top: 4px; }
+  .sync-arrow { color: #475569; font-size: 20px; }
+  .sync-arrow-label { font-size: 10px; color: #64748b; text-align: center; }
+
+  /* Legend */
+  .legend { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 20px; }
+  .legend-item { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #64748b; }
+  .legend-dot { width: 10px; height: 10px; border-radius: 50%; }
+
+  /* Responsive */
+  @media (max-width: 900px) {
+    .row-2, .row-3 { grid-template-columns: 1fr; }
+  }
+
+  .highlight-box { background: #1a1a2e; border-left: 3px solid #7dd3fc; padding: 10px 14px; border-radius: 0 6px 6px 0; margin: 10px 0; }
+  .highlight-box p { font-size: 11px; color: #94a3b8; line-height: 1.6; }
+  .highlight-box .hl { color: #fbbf24; font-weight: 600; }
+</style>
+</head>
+<body>
+
+<h1>DLAI Checkout Flow & Stripe Data Sync Architecture</h1>
+<p class="subtitle">Deep analysis of user payment fields, webhook sync mechanisms, and identified issues</p>
+
+<div class="legend">
+  <div class="legend-item"><div class="legend-dot" style="background:#86efac"></div> Frontend (learnext)</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#38bdf8"></div> Backend API (platform-api)</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#635bff"></div> Stripe</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#c4b5fd"></div> MySQL DB</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#fbbf24"></div> Webhook Events</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#f87171"></div> Sync Risk Points</div>
+</div>
+
+<div class="grid">
+
+<!-- ============ SECTION 1: CRITICAL USER FIELDS ============ -->
+<div class="section-header">1. Critical User Data Fields (Payment/Subscription)</div>
+
+<div class="row row-3">
+  <div class="card">
+    <div class="card-title">UserProfileResponse <span class="badge badge-green">API Response</span></div>
+    <div class="model">
+      <div class="model-name">Fields sent to Frontend</div>
+      <ul class="model-fields">
+        <li><span class="fname">tier</span> <span class="ftype">UserTier</span> <span class="fcomment">free | plus | pro | enterprise</span></li>
+        <li><span class="fname">everPaid</span> <span class="ftype">bool</span> <span class="fcomment">ever paid for any sub (personal or team)</span></li>
+        <li><span class="fname">userTrialAvailable</span> <span class="ftype">bool</span> <span class="fcomment">eligible for trial?</span></li>
+        <li><span class="fname">individual.subscriptionState</span> <span class="ftype">enum</span> <span class="fcomment">never_subscribed | active | inactive | payment_failed</span></li>
+        <li><span class="fname">teams[].subscriptionState</span> <span class="ftype">enum</span> <span class="fcomment">per-team sub state</span></li>
+        <li><span class="fname">teams[].role</span> <span class="ftype">enum</span> <span class="fcomment">admin | member</span></li>
+      </ul>
+    </div>
+    <div class="highlight-box">
+      <p><span class="hl">tier</span> and <span class="hl">everPaid</span> are <b>dynamically computed</b> on every API call via complex SQL queries (UNION ALL of 4+ subqueries). They are NOT read from user_info columns.</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">UserInfo <span class="badge badge-purple">DB Table</span></div>
+    <div class="model">
+      <div class="model-name">user_info (MySQL)</div>
+      <ul class="model-fields">
+        <li><span class="fname">user_id</span> <span class="ftype">INT PK</span></li>
+        <li><span class="fname">user_hash</span> <span class="ftype">VARCHAR(26)</span> <span class="fcomment">unique identifier</span></li>
+        <li><span class="fname">email</span> <span class="ftype">VARCHAR</span></li>
+        <li><span class="fname deprecated">tier</span> <span class="ftype">VARCHAR(10)</span> <span class="fcomment">TODO: Remove - now dynamically computed</span></li>
+        <li><span class="fname deprecated">ever_paid_for_pro</span> <span class="ftype">BOOL</span> <span class="fcomment">TODO: Remove - no longer updated</span></li>
+      </ul>
+    </div>
+    <div class="highlight-box">
+      <p>Legacy columns <span class="hl">tier</span> and <span class="hl">ever_paid_for_pro</span> still exist in the DB but are <b>dead code</b> - marked with TODO to remove. All reads now use <code>get_tier()</code> and <code>has_ever_paid()</code> which query across multiple tables.</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">UserSubscription <span class="badge badge-purple">DB Table</span></div>
+    <div class="model">
+      <div class="model-name">user_subscription (MySQL)</div>
+      <ul class="model-fields">
+        <li><span class="fname">user_subscription_id</span> <span class="ftype">INT PK</span></li>
+        <li><span class="fname">user_hash</span> <span class="ftype">FK &rarr; user_info</span></li>
+        <li><span class="fname">gw_customer_id</span> <span class="ftype">VARCHAR</span> <span class="fcomment">Stripe customer ID</span></li>
+        <li><span class="fname">gw_subscription_id</span> <span class="ftype">VARCHAR</span> <span class="fcomment">Stripe subscription ID</span></li>
+        <li><span class="fname">plan</span> <span class="ftype">enum</span> <span class="fcomment">plus | pro | team</span></li>
+        <li><span class="fname">recurrence</span> <span class="ftype">enum</span> <span class="fcomment">month | year</span></li>
+        <li><span class="fname">gw_subscription_status</span> <span class="ftype">VARCHAR</span> <span class="fcomment">trialing | active | past_due | canceling | canceled</span></li>
+        <li><span class="fname">effective_time</span> <span class="ftype">DateTime</span> <span class="fcomment">sub start</span></li>
+        <li><span class="fname">expiry_time</span> <span class="ftype">DateTime</span> <span class="fcomment">sub end</span></li>
+        <li><span class="fname">cancel_at</span> <span class="ftype">DateTime</span> <span class="fcomment">user cancel time</span></li>
+        <li><span class="fname">team_id</span> <span class="ftype">FK &rarr; team</span> <span class="fcomment">NULL for individual</span></li>
+        <li><span class="fname">latest_event_id</span> <span class="ftype">FK &rarr; stripe_event</span></li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<div class="row row-2">
+  <div class="card">
+    <div class="card-title">StripeSubscriptionPeriod <span class="badge badge-purple">DB Table</span></div>
+    <div class="model">
+      <div class="model-name">stripe_subscription_period</div>
+      <ul class="model-fields">
+        <li><span class="fname">stripe_subscription_id</span> <span class="ftype">VARCHAR</span> <span class="fcomment">join key to user_subscription</span></li>
+        <li><span class="fname">stripe_invoice_id</span> <span class="ftype">VARCHAR UNIQUE</span> <span class="fcomment">dedup key</span></li>
+        <li><span class="fname">charging_time</span> <span class="ftype">DateTime</span> <span class="fcomment">NULL = not yet charged (critical for tier calc!)</span></li>
+        <li><span class="fname">payment_failed_count</span> <span class="ftype">INT</span></li>
+        <li><span class="fname">period_start_time / period_end_time</span> <span class="ftype">DateTime</span></li>
+        <li><span class="fname">plan / recurrence</span> <span class="ftype">enum</span></li>
+        <li><span class="fname">quantity</span> <span class="ftype">INT</span> <span class="fcomment">Team plan seat count</span></li>
+      </ul>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-title">How tier & everPaid are Computed <span class="badge badge-amber">Runtime Query</span></div>
+    <div class="flow">
+      <div class="flow-step">
+        <div class="flow-num">T</div>
+        <div class="flow-text"><code>get_tier(user_hash)</code> runs UNION ALL of 4 queries:<br>
+          Q1: Personal sub + valid period (charging_time NOT NULL, period covers now)<br>
+          Q2: Team sub + valid period (same + team member active)<br>
+          Q3: Personal sub fallback (no period record yet - <span class="warn">webhook delay gap</span>)<br>
+          Q4: Team sub fallback (same for team)<br>
+          Returns <span class="field">PRO</span> if any match, else <span class="field">FREE</span>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="flow-num">E</div>
+        <div class="flow-text"><code>has_ever_paid(user_hash)</code> checks:<br>
+          - Personal sub with <span class="field">charging_time</span> (excl. trial upgrades)<br>
+          - Team sub where user was active member during paid period<br>
+          - Fallback: active gw_subscription_status without period record
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ SECTION 2: CHECKOUT FLOW ============ -->
+<div class="section-header">2. Full Checkout Flow (Happy Path)</div>
+
+<div class="card">
+  <div class="sync-box">
+    <div class="sync-node fe"><div class="label">learnext</div><div class="sub">Next.js Frontend</div></div>
+    <div><div class="sync-arrow">&rarr;</div><div class="sync-arrow-label">tRPC</div></div>
+    <div class="sync-node fe"><div class="label">tRPC Router</div><div class="sub">payment.ts</div></div>
+    <div><div class="sync-arrow">&rarr;</div><div class="sync-arrow-label">HTTP POST</div></div>
+    <div class="sync-node api"><div class="label">platform-api</div><div class="sub">FastAPI</div></div>
+    <div><div class="sync-arrow">&rarr;</div><div class="sync-arrow-label">API call</div></div>
+    <div class="sync-node stripe"><div class="label">Stripe</div><div class="sub">Checkout Session</div></div>
+    <div><div class="sync-arrow">&rarr;</div><div class="sync-arrow-label">webhooks</div></div>
+    <div class="sync-node api"><div class="label">platform-api</div><div class="sub">Webhook Handler</div></div>
+    <div><div class="sync-arrow">&rarr;</div><div class="sync-arrow-label">SQL</div></div>
+    <div class="sync-node db"><div class="label">MySQL</div><div class="sub">5+ tables</div></div>
+  </div>
+</div>
+
+<div class="row row-2">
+  <div class="card">
+    <div class="card-title">Frontend &rarr; Backend (Checkout Initiation) <span class="badge badge-green">learnext</span></div>
+    <div class="flow">
+      <div class="flow-step">
+        <div class="flow-num">1</div>
+        <div class="flow-text">User clicks "Subscribe" in <code>PricingPlanModal</code><br>
+          Calls <code>useCheckout().handleCheckout({ plan, recurrence, quantity? })</code>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="flow-num">2</div>
+        <div class="flow-text">tRPC mutation <span class="endpoint">payment.createCheckoutSession</span><br>
+          Posts to platform-api: <code>POST /checkout-session</code><br>
+          Body: <code>{ plan, recurrence, cancel_page_url, success_page_url, next_url_after_success_page, quantity? }</code>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="flow-num">3</div>
+        <div class="flow-text">platform-api creates Stripe Checkout Session via <code>stripe.checkout.Session.create()</code><br>
+          Saves to <span class="table">stripe_checkout_session</span> table (user_hash, session_id, plan, recurrence, state=OPEN)<br>
+          Returns <code>{ stripeCheckoutPageUrl, sessionId }</code>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="flow-num">4</div>
+        <div class="flow-text">Frontend redirects user: <code>window.location.href = checkoutUrl</code><br>
+          User completes payment on Stripe's hosted checkout page
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="flow-num">5</div>
+        <div class="flow-text">Stripe redirects to <code>/checkout-success</code> (or <code>/team-checkout-success</code>)<br>
+          Frontend starts <span class="info">polling</span> via <code>useSubscriptionStatePolling</code> (1s interval, max 10 polls)
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Stripe &rarr; Backend (Webhook Processing) <span class="badge badge-amber">Async</span></div>
+    <div class="flow">
+      <div class="flow-step">
+        <div class="flow-num">A</div>
+        <div class="flow-text"><span class="webhook">checkout.session.completed</span><br>
+          Updates <span class="table">stripe_checkout_session</span>: state &rarr; COMPLETE, completed_at
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="flow-num">B</div>
+        <div class="flow-text"><span class="webhook">customer.subscription.created</span><br>
+          Creates <span class="table">user_subscription</span> record (status, plan, recurrence, effective_time)<br>
+          Updates Stripe customer metadata with user_hash<br>
+          <b>Team plan:</b> also creates <span class="table">team</span> + <span class="table">team_member</span> (admin)
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="flow-num">C</div>
+        <div class="flow-text"><span class="webhook">invoice.payment_succeeded</span><br>
+          Upserts <span class="table">stripe_subscription_period</span> (charging_time, period_start/end)<br>
+          <span class="warn">This is what makes get_tier() return PRO!</span>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="flow-num">D</div>
+        <div class="flow-text">Frontend polling hits <code>GET /user/profile</code> which calls <code>get_tier()</code><br>
+          <span class="info">If webhook C hasn't arrived yet, fallback query (Q3/Q4) uses gw_subscription_status</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ SECTION 3: ALL WEBHOOK EVENTS ============ -->
+<div class="section-header">3. All Stripe Webhook Events Handled</div>
+
+<div class="card">
+  <ul class="event-list">
+    <li>
+      <span class="event-name">checkout.session.completed</span>
+      <span class="event-action">Updates <b>stripe_checkout_session</b> state &rarr; COMPLETE. No subscription/tier changes.</span>
+    </li>
+    <li>
+      <span class="event-name">checkout.session.expired</span>
+      <span class="event-action">Updates <b>stripe_checkout_session</b> state &rarr; EXPIRED. Guards against out-of-order events.</span>
+    </li>
+    <li>
+      <span class="event-name">customer.subscription.created</span>
+      <span class="event-action">Creates <b>user_subscription</b> row. For team plan: creates <b>team</b> + <b>team_member</b>. Dedup via existing active sub check.</span>
+    </li>
+    <li>
+      <span class="event-name">customer.subscription.updated</span>
+      <span class="event-action">Expires old <b>user_subscription</b>, creates new one with updated plan/recurrence. Handles trial&rarr;active, month&rarr;year upgrades.</span>
+    </li>
+    <li>
+      <span class="event-name">customer.subscription.deleted</span>
+      <span class="event-action">Sets cancel_at + expiry_time on <b>user_subscription</b>, status &rarr; canceled. Team: soft-deletes team + members.</span>
+    </li>
+    <li>
+      <span class="event-name">invoice.payment_succeeded</span>
+      <span class="event-action">Upserts <b>stripe_subscription_period</b> with charging_time. Handles subscription_create / subscription_cycle / subscription_update billing reasons.</span>
+    </li>
+    <li>
+      <span class="event-name">invoice.payment_failed</span>
+      <span class="event-action">Upserts <b>stripe_subscription_period</b> with payment_failed_count++. Tracks payment_latest_failed_at.</span>
+    </li>
+    <li>
+      <span class="event-name">price.created / price.updated</span>
+      <span class="event-action">Syncs <b>stripe_subscription_price</b> table (price &rarr; plan/recurrence mapping). Manages visible_to_user and active flags.</span>
+    </li>
+  </ul>
+</div>
+
+<!-- ============ SECTION 4: SYNC MECHANISM & TIMING ============ -->
+<div class="section-header">4. Data Sync Mechanism & Timing Analysis</div>
+
+<div class="row row-2">
+  <div class="card">
+    <div class="card-title">Current Sync Architecture <span class="badge badge-blue">Webhook-Only</span></div>
+    <div class="flow">
+      <div class="flow-step">
+        <div class="flow-num">1</div>
+        <div class="flow-text"><b>NO scheduled jobs / cron</b> - 100% webhook-driven sync<br>
+          All state changes depend on Stripe webhooks arriving and processing successfully
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="flow-num">2</div>
+        <div class="flow-text"><b>NO on-demand Stripe API calls</b> for tier/status<br>
+          <code>get_tier()</code> and <code>has_ever_paid()</code> query local DB only
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="flow-num">3</div>
+        <div class="flow-text"><b>Frontend polling</b> after checkout: 1s &times; 10 polls = 10s window<br>
+          <code>useSubscriptionStatePolling</code> invalidates getUserProfile every 1s
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="flow-num">4</div>
+        <div class="flow-text"><b>Event log</b>: all webhooks stored in <span class="table">stripe_event</span> with state tracking<br>
+          States: UNPROCESSED &rarr; PROCESSED | FAILED<br>
+          <span class="warn">No retry mechanism implemented</span> (TODO in code)
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Timing: Checkout &rarr; Tier Active <span class="badge badge-red">Race Window</span></div>
+    <div class="flow">
+      <div class="flow-step">
+        <div class="flow-num">T0</div>
+        <div class="flow-text">User completes payment on Stripe checkout page</div>
+      </div>
+      <div class="flow-step">
+        <div class="flow-num">T1</div>
+        <div class="flow-text">Stripe fires <span class="webhook">checkout.session.completed</span> (~instant)<br>
+          &rarr; Only updates checkout session state, <span class="warn">no tier change yet</span></div>
+      </div>
+      <div class="flow-step">
+        <div class="flow-num">T2</div>
+        <div class="flow-text">Stripe fires <span class="webhook">customer.subscription.created</span> (~0-5s)<br>
+          &rarr; Creates user_subscription with status=trialing/active<br>
+          &rarr; <span class="info">Fallback query Q3/Q4 can now return PRO</span></div>
+      </div>
+      <div class="flow-step">
+        <div class="flow-num">T3</div>
+        <div class="flow-text">Stripe fires <span class="webhook">invoice.payment_succeeded</span> (~0-30s)<br>
+          &rarr; Creates stripe_subscription_period with charging_time<br>
+          &rarr; <span class="info">Primary query Q1/Q2 now returns PRO</span></div>
+      </div>
+      <div class="flow-step">
+        <div class="flow-num">T4</div>
+        <div class="flow-text">Frontend polling catches updated tier (within 10s window after redirect)<br>
+          <span class="warn">If T2 takes &gt;10s, polling window closes before tier is updated!</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ SECTION 5: IDENTIFIED ISSUES ============ -->
+<div class="section-header">5. Identified Sync Issues & Risks</div>
+
+<div class="row row-2">
+  <div class="card">
+    <div class="card-title">Sync / Delay Problems <span class="badge badge-red">Issues</span></div>
+
+    <div class="issue">
+      <div class="issue-title">1. Webhook-Only Architecture = Single Point of Failure</div>
+      <div class="issue-desc">
+        If a webhook fails or is delayed (Stripe outage, network issue, server error), the user's tier/subscription state becomes stale. There is <b>no retry mechanism</b> (TODO in code), no reconciliation job, and no way for the user to manually trigger a resync. Failed events stay in FAILED state forever.
+      </div>
+    </div>
+
+    <div class="issue">
+      <div class="issue-title">2. Race Condition: Polling Window vs Webhook Arrival</div>
+      <div class="issue-desc">
+        After checkout, frontend polls for 10 seconds (1s &times; 10). But the critical <code>customer.subscription.created</code> webhook can take 0-30+ seconds to arrive and process. If it arrives after polling ends, the user sees themselves as FREE until they manually refresh. The fallback queries (Q3/Q4) mitigate this but only if subscription.created webhook arrives within the poll window.
+      </div>
+    </div>
+
+    <div class="issue">
+      <div class="issue-title">3. Out-of-Order Webhook Events</div>
+      <div class="issue-desc">
+        Stripe doesn't guarantee event ordering. Code handles some cases (checkout session state guards, existing active subscription check), but <code>subscription.updated</code> arriving before <code>subscription.created</code> will fail with "subscription not found". The <code>invoice.payment_succeeded</code> with billing_reason=subscription_update relies on finding a previous period that may not exist yet.
+      </div>
+    </div>
+
+    <div class="issue">
+      <div class="issue-title">4. get_tier() Complexity = Performance & Correctness Risk</div>
+      <div class="issue-desc">
+        <code>get_tier()</code> runs a UNION ALL of 4 subqueries with JOINs across 5 tables on <b>every profile request</b>. Currently ~150ms but fragile: any new plan type, edge case, or data inconsistency requires updating complex SQL. The fallback queries (Q3/Q4) exist specifically to handle webhook delays, adding permanent complexity for a transient problem.
+      </div>
+    </div>
+
+    <div class="issue">
+      <div class="issue-title">5. Dead Columns: user_info.tier & ever_paid_for_pro</div>
+      <div class="issue-desc">
+        Legacy columns still exist in the DB and model but are never updated. Any code accidentally reading these (admin panel, reporting queries, data exports) would get stale/wrong values. Risk of confusion for new developers.
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Improvement Recommendations <span class="badge badge-green">Solutions</span></div>
+
+    <div class="improvement">
+      <div class="improvement-title">A. Add Webhook Retry + Dead Letter Queue</div>
+      <div class="improvement-desc">
+        Implement the TODO: retry failed events (3 attempts with exponential backoff). After max retries, move to a dead letter queue with alerting. This prevents permanent state desync from transient failures.
+      </div>
+    </div>
+
+    <div class="improvement">
+      <div class="improvement-title">B. Stripe API Fallback on Cache Miss</div>
+      <div class="improvement-desc">
+        When <code>get_tier()</code> returns FREE for a user who <i>just completed checkout</i>, add an on-demand Stripe API check: <code>stripe.Subscription.list(customer=cust_id, status='active')</code>. Only trigger this when checkout session is COMPLETE but no active subscription exists. This closes the race window completely.
+      </div>
+    </div>
+
+    <div class="improvement">
+      <div class="improvement-title">C. Simplify tier to a Materialized Column</div>
+      <div class="improvement-desc">
+        Instead of computing tier on every request with 4-query UNION ALL, <b>update user_info.tier directly</b> when webhooks process. The column already exists! This eliminates: (1) 150ms query overhead on every profile call, (2) fallback query complexity, (3) edge cases from eventual consistency. Webhook handlers already know the correct tier - just write it.
+      </div>
+    </div>
+
+    <div class="improvement">
+      <div class="improvement-title">D. Add Periodic Reconciliation Job</div>
+      <div class="improvement-desc">
+        Run a nightly cron that compares Stripe subscription states with local DB. For any mismatches, fetch the latest from Stripe API and update DB. This catches any missed/failed webhooks and provides a safety net for the webhook-only architecture.
+      </div>
+    </div>
+
+    <div class="improvement">
+      <div class="improvement-title">E. Extend Polling or Use Server-Sent Events</div>
+      <div class="improvement-desc">
+        Current 10-poll window is too tight. Options: (1) Increase to 30 polls / 30s, (2) Switch to SSE/WebSocket that pushes tier change when webhook processes, (3) Use checkout session ID to poll a dedicated endpoint that checks if subscription.created webhook has been received.
+      </div>
+    </div>
+
+    <div class="improvement">
+      <div class="improvement-title">F. Clean Up Dead Columns</div>
+      <div class="improvement-desc">
+        Remove <code>user_info.tier</code> and <code>user_info.ever_paid_for_pro</code> columns (or repurpose them per option C). This eliminates confusion and prevents accidental reads of stale data.
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ SECTION 6: ARCHITECTURE OVERVIEW ============ -->
+<div class="section-header">6. Recommended Simplified Architecture</div>
+
+<div class="card">
+  <div style="text-align:center; padding: 20px 0;">
+    <div style="display:inline-block; text-align:left; font-size: 12px; line-height: 2.2; color: #94a3b8;">
+      <pre style="color:#94a3b8; font-size: 12px;">
+<span style="color:#86efac">CURRENT (Complex):</span>
+  User Request &rarr; get_tier() &rarr; 4-query UNION ALL across 5 tables (~150ms)
+  Webhook &rarr; update user_subscription + stripe_subscription_period (tier computed at read time)
+  Frontend &rarr; poll 10x hoping webhook arrived
+
+<span style="color:#f87171">Problems:</span> Expensive reads, race conditions, no retry, fallback query complexity
+
+<span style="color:#7dd3fc">PROPOSED (Simple):</span>
+  User Request &rarr; read user_info.tier directly (~1ms)
+  Webhook &rarr; update user_subscription + stripe_subscription_period + <span style="color:#fbbf24">UPDATE user_info SET tier=X</span>
+  Webhook fail &rarr; retry 3x &rarr; dead letter queue + alert
+  Nightly cron &rarr; reconcile Stripe vs DB, fix any drift
+  Frontend &rarr; poll with Stripe API fallback for checkout flow
+
+<span style="color:#86efac">Benefits:</span> O(1) tier reads, no race window, self-healing, simpler code
+      </pre>
+    </div>
+  </div>
+</div>
+
+<!-- ============ SECTION 7: DB RELATIONSHIP DIAGRAM ============ -->
+<div class="section-header">7. Database Relationship Map</div>
+
+<div class="card">
+  <div style="text-align:center; padding: 16px 0;">
+    <pre style="color:#94a3b8; font-size: 11px; display:inline-block; text-align:left; line-height: 1.8;">
+<span style="color:#c4b5fd">user_info</span>
+  &boxvr;&boxh;&boxh; user_hash (PK-like)
+  &boxvr;&boxh;&boxh; <span style="color:#f87171;text-decoration:line-through">tier</span> (dead column)
+  &boxvr;&boxh;&boxh; <span style="color:#f87171;text-decoration:line-through">ever_paid_for_pro</span> (dead column)
+  &boxv;
+  &boxvr;&boxh;&boxh;&boxh;&boxh; 1:N &boxh;&boxh;&boxh;&boxh;&rarr; <span style="color:#c4b5fd">user_subscription</span>
+  &boxv;                       &boxvr;&boxh;&boxh; gw_subscription_id  &boxh;&boxh;&boxh; join key &boxh;&boxh;&boxh;&rarr; <span style="color:#c4b5fd">stripe_subscription_period</span>
+  &boxv;                       &boxvr;&boxh;&boxh; gw_customer_id                              &boxvr;&boxh;&boxh; <span style="color:#fbbf24">charging_time</span> (critical for tier!)
+  &boxv;                       &boxvr;&boxh;&boxh; gw_subscription_status                      &boxvr;&boxh;&boxh; period_start_time / period_end_time
+  &boxv;                       &boxvr;&boxh;&boxh; plan / recurrence                           &boxvr;&boxh;&boxh; payment_failed_count
+  &boxv;                       &boxvr;&boxh;&boxh; effective_time / expiry_time                 &boxur;&boxh;&boxh; latest_event_id &rarr; <span style="color:#fbbf24">stripe_event</span>
+  &boxv;                       &boxvr;&boxh;&boxh; team_id &boxh;&boxh;&boxh;&rarr; <span style="color:#c4b5fd">team</span> &boxh;&boxh; 1:N &boxh;&boxh;&rarr; <span style="color:#c4b5fd">team_member</span>
+  &boxv;                       &boxur;&boxh;&boxh; latest_event_id &rarr; <span style="color:#fbbf24">stripe_event</span>
+  &boxv;
+  &boxur;&boxh;&boxh;&boxh;&boxh; 1:N &boxh;&boxh;&boxh;&boxh;&rarr; <span style="color:#c4b5fd">stripe_checkout_session</span>
+                          &boxvr;&boxh;&boxh; stripe_checkout_session_id (PK)
+                          &boxvr;&boxh;&boxh; checkout_session_state (open/complete/expired)
+                          &boxvr;&boxh;&boxh; plan / recurrence
+                          &boxur;&boxh;&boxh; latest_event_id &rarr; <span style="color:#fbbf24">stripe_event</span>
+
+<span style="color:#fbbf24">stripe_event</span> (audit log)
+  &boxvr;&boxh;&boxh; event_id (PK)
+  &boxvr;&boxh;&boxh; stripe_event_id (from Stripe)
+  &boxvr;&boxh;&boxh; event_type (9 types handled)
+  &boxvr;&boxh;&boxh; event_data (JSON payload)
+  &boxvr;&boxh;&boxh; event_state (unprocessed/processed/failed)
+  &boxur;&boxh;&boxh; <span style="color:#f87171">NO retry fields implemented</span> (failed_at exists but no retry_count/next_retry)
+
+<span style="color:#635bff">stripe_subscription_price</span> (price catalog)
+  &boxvr;&boxh;&boxh; stripe_price_id (PK)  &boxh;&boxh;&boxh; maps to &boxh;&boxh;&boxh;&rarr; plan + recurrence
+  &boxvr;&boxh;&boxh; stripe_product_id
+  &boxvr;&boxh;&boxh; visible_to_user / active
+  &boxur;&boxh;&boxh; lookup_key
+    </pre>
+  </div>
+</div>
+
+</div>
+</body>
+</html>
